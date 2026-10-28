@@ -1,3 +1,4 @@
+
 # Render Blueprint Infrastructure as Code for LifeDrop
 # Defines PostgreSQL Database, Express Node.js Web API, and React Static Site
 # Docs: https://render.com/docs/blueprint-spec
@@ -12,7 +13,7 @@ services:
     name: lifedrop-api
     runtime: node
     rootDir: backend
-    plan: free # Free tier (upgrade to starter if no spin-down desired)
+    plan: free
     region: oregon
     buildCommand: npm install --include=dev && npm run build && npx prisma migrate deploy
     startCommand: npm start
@@ -21,27 +22,33 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+
       - key: DATABASE_URL
         fromDatabase:
           name: lifedrop-db
           property: connectionString
+
       - key: FRONTEND_URL
         sync: false
-        # e.g., https://lifedrop-frontend.onrender.com or https://lifedrop.vercel.app
+
       - key: CORS_ORIGINS
         sync: false
-        # e.g., https://lifedrop-frontend.onrender.com,https://lifedrop.vercel.app
+
       - key: JWT_ACCESS_SECRET
         generateValue: true
+
       - key: JWT_ACCESS_EXPIRES_IN
         value: 15m
+
       - key: REFRESH_TOKEN_EXPIRES_DAYS
         value: 7
+
       - key: ADMIN_PASSKEY_PIN
         sync: false
-        # Initial super-admin pin (e.g., 901234)
+
       - key: SMS_PROVIDER
         value: mock
+
       - key: LOG_LEVEL
         value: info
 
@@ -52,7 +59,6 @@ services:
     name: lifedrop-frontend
     runtime: static
     rootDir: .
-    plan: free
     buildCommand: npm install && npm run build
     staticPublishPath: ./dist
     routes:
@@ -62,15 +68,14 @@ services:
     envVars:
       - key: VITE_API_BASE_URL
         sync: false
-        # Set to: https://lifedrop-api.onrender.com/api/v1 (replace with your api service url)
 
+# ----------------------------------------------------------------------------
+# 3. Managed PostgreSQL Database
+# ----------------------------------------------------------------------------
 databases:
-  # ----------------------------------------------------------------------------
-  # 3. Managed PostgreSQL Database
-  # ----------------------------------------------------------------------------
   - name: lifedrop-db
     databaseName: lifedrop
     user: lifedrop_user
     plan: free
     region: oregon
-    ipAllowList: [] # Kept secure to internal Render network
+    ipAllowList: []
