@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LifeDrop – Blood Donation Coordination System</title>
+    <meta name="description" content="Connecting patients, donors, hospitals and blood banks when every second matters. Real-time emergency blood coordination platform." />
+    <!-- Modern Typography: Plus Jakarta Sans & Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <!-- OWASP Anti-Clickjacking Frame Guard -->
+    <style id="anti-clickjack">body{display:none !important;}</style>
+    <script>
+      if (self === top) {
+        var antiClickjack = document.getElementById("anti-clickjack");
+        if (antiClickjack && antiClickjack.parentNode) {
+          antiClickjack.parentNode.removeChild(antiClickjack);
+        }
+      } else {
+        top.location = self.location;
+      }
+    </script>
+  </head>
+  <body class="bg-lifedrop-bg text-lifedrop-text font-sans antialiased selection:bg-lifedrop-primary selection:text-white">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
