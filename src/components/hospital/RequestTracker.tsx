@@ -284,10 +284,15 @@ export const RequestTracker: React.FC<RequestTrackerProps> = ({
 
                   <div className="flex flex-col items-end gap-1.5">
                     <StatusBadge type="donorResponse" value={donor.status} size="sm" />
-                    {onReportDonor && donor.status === 'NO_SHOW' && (
+                    {onReportDonor && (
                       <button
                         onClick={() => onReportDonor(donor.donorId, request.id)}
-                        className="text-[10px] font-bold text-rose-600 hover:underline flex items-center gap-1"
+                        title="Report donor misconduct, fraudulent details, or no-show"
+                        className={`text-[10px] font-bold flex items-center gap-1 ${
+                          donor.status === 'NO_SHOW'
+                            ? 'text-rose-600 hover:underline'
+                            : 'text-slate-400 hover:text-rose-600 transition-colors'
+                        }`}
                       >
                         <ShieldAlert className="w-3 h-3" /> Report Donor
                       </button>

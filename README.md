@@ -103,21 +103,32 @@ erDiagram
 
 ---
 
-## 4. Database Setup & PostgreSQL Instructions
+## 4. Cross-Platform Database Setup & PostgreSQL Instructions
 
-### Local PostgreSQL Setup on macOS
+LifeDrop supports all major operating systems: **Windows**, **Linux**, and **macOS**, as well as containerized setups using **Docker**.
 
-1. **Install PostgreSQL**:
-   ```bash
-   brew install postgresql@16
-   brew services start postgresql@16
+### Option A: Docker Compose (Universal for Windows, macOS, Linux — Recommended)
+
+Run PostgreSQL with a single command without installing PostgreSQL directly on your host:
+
+```bash
+docker compose up -d postgres
+```
+This automatically boots PostgreSQL 16 on port 5432 and initializes both `lifedrop` and `lifedrop_test` databases via [database/init.sql](file:///Users/rohan/Desktop/Life%20Drop/database/init.sql).
+
+---
+
+### Option B: Local PostgreSQL Setup
+
+#### 🪟 Windows Setup
+1. **Option 1 (Winget)**:
+   ```powershell
+   winget install PostgreSQL.PostgreSQL.16
    ```
-
-2. **Create Database User & Databases**:
-   ```bash
-   psql -U postgres -d postgres
-   ```
-   Execute the following SQL commands:
+2. **Option 2 (Official Installer)**:
+   - Download the Windows installer from [EnterpriseDB PostgreSQL](https://www.enterprisedb.com/downloads/postgres-postgresql-downloads).
+   - Follow the installation wizard and launch **SQL Shell (psql)** or **pgAdmin 4**.
+3. **Execute SQL Setup** (in PowerShell or SQL Shell):
    ```sql
    CREATE USER lifedrop_user WITH PASSWORD 'lifedrop_secure_pass_2026';
    ALTER USER lifedrop_user CREATEDB;
@@ -131,10 +142,38 @@ erDiagram
    GRANT ALL ON SCHEMA public TO lifedrop_user;
    ```
 
-3. **Verify Database Connection**:
+#### 🐧 Linux Setup (Ubuntu / Debian / Mint)
+1. **Install PostgreSQL**:
    ```bash
-   psql -U lifedrop_user -d lifedrop -h localhost -p 5432
+   sudo apt update
+   sudo apt install -y postgresql postgresql-contrib
+   sudo systemctl enable postgresql
+   sudo systemctl start postgresql
    ```
+2. **Execute SQL Setup**:
+   ```bash
+   sudo -u postgres psql
+   ```
+   Paste the SQL setup commands from above.
+
+#### 🍏 macOS Setup
+1. **Install with Homebrew**:
+   ```bash
+   brew install postgresql@16
+   brew services start postgresql@16
+   ```
+2. **Execute SQL Setup**:
+   ```bash
+   psql -U postgres -d postgres
+   ```
+   Paste the SQL setup commands from above.
+
+---
+
+### 3. Verify Database Connection (All Platforms)
+```bash
+psql -U lifedrop_user -d lifedrop -h localhost -p 5432
+```
 
 ---
 
@@ -213,24 +252,41 @@ LOG_LEVEL="info"
 
 ---
 
-## 7. Running the Application
+## 7. Running the Application (Cross-Platform)
 
-### Start the Backend API (Port 5001)
+### Quick One-Click Dev Launchers
 
+- **Windows Users**:
+  Double-click `start-dev.bat` or run:
+  ```cmd
+  start-dev.bat
+  ```
+  *(Opens the backend and frontend in parallel windows automatically)*
+
+- **macOS & Linux Users**:
+  Run the launcher script:
+  ```bash
+  ./start-dev.sh
+  ```
+
+---
+
+### Manual Terminal Commands (All Platforms)
+
+#### 1. Start the Backend API (Port 5001)
 ```bash
 cd backend
 npm run dev
 ```
-Health status check: `curl http://localhost:5001/health/ready`
-Swagger UI Documentation: `http://localhost:5001/docs`
+- Health status check: `curl http://localhost:5001/health/ready`
+- Swagger UI Documentation: `http://localhost:5001/docs`
 
-### Start the Frontend Application (Port 5173)
-
+#### 2. Start the Frontend Application (Port 3000 / 5173)
 ```bash
-# In the root workspace directory
+# In the root repository directory
 npm run dev
 ```
-Open `http://localhost:5173` in your browser.
+Open `http://localhost:3000` in your browser.
 
 ---
 

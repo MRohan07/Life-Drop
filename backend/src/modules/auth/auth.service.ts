@@ -11,7 +11,7 @@ import {
   generateRefreshTokenString,
 } from '../../common/utils/tokens.js';
 import { ENV } from '../../config/env.js';
-import { UserRole, BloodGroup, ComponentType, VerificationStatus } from '@prisma/client';
+import { UserRole, BloodGroup, ComponentType, VerificationStatus, UserStatus } from '@prisma/client';
 import { logger } from '../../common/logging/logger.js';
 import { facilityApplicationsService } from '../facility-applications/facility-applications.service.js';
 
@@ -267,6 +267,24 @@ export class AuthService {
       throw AppError.unauthorized('No account found matching these credentials');
     }
 
+    if (user.status === UserStatus.SUSPENDED) {
+      throw AppError.forbidden(
+        'Your account has been suspended by system administrator. Operational access has been revoked.'
+      );
+    }
+
+    if (user.hospital && (user.hospital.status === VerificationStatus.SUSPENDED || (!user.hospital.isVerified && user.hospital.status === 'REJECTED'))) {
+      throw AppError.forbidden(
+        'Operational facility access is restricted. Your hospital account has been suspended or revoked by platform administrators.'
+      );
+    }
+
+    if (user.bloodBank && (user.bloodBank.status === VerificationStatus.SUSPENDED || (!user.bloodBank.isVerified && user.bloodBank.status === 'REJECTED'))) {
+      throw AppError.forbidden(
+        'Operational facility access is restricted. Your blood bank account has been suspended or revoked by platform administrators.'
+      );
+    }
+
     if (password && user.passwordHash) {
       const isValid = await verifyPassword(user.passwordHash, password);
       if (!isValid) {
@@ -389,6 +407,12 @@ export class AuthService {
       });
     }
 
+    if (user.status === UserStatus.SUSPENDED) {
+      throw AppError.forbidden(
+        'Your account has been suspended by system administrator. Operational access has been revoked.'
+      );
+    }
+
     const accessToken = signAccessToken({
       userId: user.id,
       role: user.role,
@@ -429,6 +453,13 @@ export class AuthService {
 
     if (!session || session.revokedAt || session.expiresAt < new Date()) {
       throw AppError.unauthorized('Invalid or expired refresh session');
+    }
+
+    if (session.user.status === UserStatus.SUSPENDED) {
+      await prisma.refreshSession.deleteMany({
+        where: { userId: session.user.id },
+      });
+      throw AppError.forbidden('Your account has been suspended by system administrator.');
     }
 
     // Revoke old session

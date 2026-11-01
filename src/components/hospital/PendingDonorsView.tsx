@@ -14,9 +14,11 @@ import {
   FileCheck2,
   X,
   Phone,
+  ShieldAlert,
 } from 'lucide-react';
 import { formatDate, formatPhone } from '../../utils/formatters';
 import { ConfirmationModal } from '../common/ConfirmationModal';
+import { ReportDonorModal } from './ReportDonorModal';
 
 interface PendingDonorsViewProps {
   onSelectRequest?: (requestId: string) => void;
@@ -38,6 +40,7 @@ export const PendingDonorsView: React.FC<PendingDonorsViewProps> = ({ onSelectRe
   const [unitsToConfirm, setUnitsToConfirm] = useState<number>(1);
   const [actionSuccessMsg, setActionSuccessMsg] = useState<string | null>(null);
   const [noShowConfirmData, setNoShowConfirmData] = useState<{ donorId: string; reqId: string; donorName: string } | null>(null);
+  const [reportDonorData, setReportDonorData] = useState<{ donorId: string; reqId: string } | null>(null);
 
   // Incomplete / Deferral modal state
   const [incompleteModalOpen, setIncompleteModalOpen] = useState(false);
@@ -329,6 +332,14 @@ export const PendingDonorsView: React.FC<PendingDonorsViewProps> = ({ onSelectRe
               >
                 Clinical Deferral / Incomplete
               </button>
+              <button
+                onClick={() => setReportDonorData({ donorId: selectedDonor.id, reqId: targetRequestId })}
+                className="px-3.5 py-2.5 rounded-xl border border-rose-200 text-rose-600 hover:bg-rose-50 font-bold text-xs flex items-center gap-1 transition-colors"
+                title="File formal misconduct or fraud report"
+              >
+                <ShieldAlert className="w-3.5 h-3.5" />
+                Report
+              </button>
             </div>
 
             <button
@@ -413,6 +424,14 @@ export const PendingDonorsView: React.FC<PendingDonorsViewProps> = ({ onSelectRe
                   >
                     No-Show
                   </button>
+
+                  <button
+                    onClick={() => setReportDonorData({ donorId: item.contribution.donorId, reqId: item.request.id })}
+                    className="p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                    title="Report donor misconduct or fraud"
+                  >
+                    <ShieldAlert className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
             ))}
@@ -490,6 +509,14 @@ export const PendingDonorsView: React.FC<PendingDonorsViewProps> = ({ onSelectRe
         confirmText="Yes, Mark No-Show"
         cancelText="Cancel"
         variant="danger"
+      />
+
+      {/* Incident Report Modal */}
+      <ReportDonorModal
+        isOpen={!!reportDonorData}
+        onClose={() => setReportDonorData(null)}
+        initialDonorId={reportDonorData?.donorId}
+        initialRequestId={reportDonorData?.reqId}
       />
     </div>
   );

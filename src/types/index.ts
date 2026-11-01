@@ -101,11 +101,12 @@ export interface UserReport {
   reporterHospitalName: string;
   reportedUserId: string;
   reportedUserName: string;
-  requestId: string;
+  requestId?: string;
   reason: 'Fraud' | 'Misuse' | 'Fake details' | 'Repeated false acceptance' | 'Suspicious activity' | 'Other';
   description: string;
   evidenceUrl?: string;
   status: 'PENDING' | 'WARNED' | 'SUSPENDED' | 'DISMISSED';
+  actionTaken?: string;
   createdAt: string;
 }
 

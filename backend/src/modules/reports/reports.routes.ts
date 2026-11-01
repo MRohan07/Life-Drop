@@ -6,6 +6,7 @@ import { UserRole } from '@prisma/client';
 const router = Router();
 
 router.use(authenticateUser);
+router.get('/my-reports', authorizeRoles(UserRole.HOSPITAL, UserRole.ADMIN), reportsController.getMyReports);
 router.post('/', authorizeRoles(UserRole.HOSPITAL, UserRole.ADMIN), reportsController.fileReport);
 
 export const reportsRoutes = router;

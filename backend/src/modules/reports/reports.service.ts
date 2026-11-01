@@ -3,6 +3,17 @@ import { AppError } from '../../common/errors/AppError.js';
 import { ReportReason, ReportStatus } from '@prisma/client';
 
 export class ReportsService {
+  async getMyReports(reporterHospitalId: string) {
+    return await prisma.userReport.findMany({
+      where: { reporterHospitalId },
+      include: {
+        reporterHospital: { select: { id: true, name: true } },
+        reportedUser: { select: { id: true, name: true, phone: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
   async fileReport(
     reporterHospitalId: string,
     data: {

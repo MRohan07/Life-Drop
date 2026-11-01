@@ -6,7 +6,8 @@ import { GoogleMapsModal } from '../common/GoogleMapsModal';
 import { ConfirmationModal } from '../common/ConfirmationModal';
 import { isBloodCompatible } from '../../utils/compatibility';
 import { formatDateTime } from '../../utils/formatters';
-import { AlertTriangle, Building2, Clock, Navigation, CheckCircle2, Search } from 'lucide-react';
+import { AlertTriangle, Building2, Clock, Navigation, CheckCircle2, Search, ShieldAlert } from 'lucide-react';
+import { UserReportModal } from './UserReportModal';
 
 export const BloodRequestsView: React.FC = () => {
   const { currentUser, requests, donorRespond } = useLifeDrop();
@@ -14,6 +15,7 @@ export const BloodRequestsView: React.FC = () => {
   const [search, setSearch] = useState('');
   const [navModal, setNavModal] = useState<any>({ isOpen: false });
   const [donateConfirmReq, setDonateConfirmReq] = useState<any>(null);
+  const [reportReq, setReportReq] = useState<any>(null);
 
   const handleConfirmDonate = () => {
     if (!donateConfirmReq) return;
@@ -91,9 +93,14 @@ export const BloodRequestsView: React.FC = () => {
                 </div>
 
                 <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-                  <button onClick={() => setNavModal({ isOpen: true, name: req.hospitalName, address: req.hospitalAddress, phone: req.hospitalPhone, type: 'Hospital', lat: req.hospitalLatitude, lng: req.hospitalLongitude, distanceKm: 2.4 })} className="text-xs font-bold text-slate-600 hover:text-slate-900 flex items-center gap-1">
-                    <Navigation className="w-3.5 h-3.5 text-slate-400" /> View Map
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <button onClick={() => setNavModal({ isOpen: true, name: req.hospitalName, address: req.hospitalAddress, phone: req.hospitalPhone, type: 'Hospital', lat: req.hospitalLatitude, lng: req.hospitalLongitude, distanceKm: 2.4 })} className="text-xs font-bold text-slate-600 hover:text-slate-900 flex items-center gap-1">
+                      <Navigation className="w-3.5 h-3.5 text-slate-400" /> View Map
+                    </button>
+                    <button onClick={() => setReportReq(req)} className="text-xs font-bold text-slate-400 hover:text-rose-600 flex items-center gap-1 transition-colors" title="Report fraudulent or suspicious blood request">
+                      <ShieldAlert className="w-3.5 h-3.5" /> Report
+                    </button>
+                  </div>
                   {isCommitted ? (
                     <span className="px-3 py-1.5 rounded-xl bg-purple-100 text-purple-800 text-xs font-extrabold">✓ Committed</span>
                   ) : !currentUser.isEligible ? (
@@ -123,6 +130,15 @@ export const BloodRequestsView: React.FC = () => {
         confirmText="Yes, I Will Donate"
         cancelText="Not Right Now"
         variant="primary"
+      />
+
+      {/* Report Suspicious Request Modal */}
+      <UserReportModal
+        isOpen={!!reportReq}
+        onClose={() => setReportReq(null)}
+        targetRequestId={reportReq?.id}
+        targetFacilityName={reportReq?.hospitalName}
+        targetFacilityId={reportReq?.hospitalId}
       />
     </div>
   );

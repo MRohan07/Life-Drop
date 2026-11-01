@@ -64,6 +64,12 @@ export class AdminService {
         },
       });
 
+      if (status === 'SUSPENDED') {
+        await tx.refreshSession.deleteMany({
+          where: { userId },
+        });
+      }
+
       await tx.auditLog.create({
         data: {
           eventType: 'USER_STATUS_CHANGE',
@@ -189,6 +195,9 @@ export class AdminService {
         await tx.user.update({
           where: { id: report.reportedUserId },
           data: { status: 'SUSPENDED' },
+        });
+        await tx.refreshSession.deleteMany({
+          where: { userId: report.reportedUserId },
         });
       } else if (status === 'WARNED') {
         await tx.user.update({

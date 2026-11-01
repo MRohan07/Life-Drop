@@ -18,6 +18,7 @@ import { NearbyBloodBanks } from '../components/user/NearbyBloodBanks';
 import { CampaignsFeed } from '../components/user/CampaignsFeed';
 import { UserProfileView } from '../components/user/UserProfile';
 import { UserTransactionsView } from '../components/user/UserTransactionsView';
+import { UserReportsView } from '../components/user/UserReportsView';
 
 // Hospital Views
 import { HospitalDashboard } from '../components/hospital/HospitalDashboard';
@@ -27,6 +28,7 @@ import { PendingDonorsView } from '../components/hospital/PendingDonorsView';
 import { HospitalBloodBanksView } from '../components/hospital/HospitalBloodBanksView';
 import { HospitalProfileView } from '../components/hospital/HospitalProfileView';
 import { HospitalTransactionsView } from '../components/hospital/HospitalTransactionsView';
+import { HospitalReportsView } from '../components/hospital/HospitalReportsView';
 
 // Blood Bank Views
 import { BloodBankDashboard } from '../components/bloodbank/BloodBankDashboard';
@@ -36,6 +38,7 @@ import { BloodBankDonationsView } from '../components/bloodbank/BloodBankDonatio
 import { BloodBankCampaignsView } from '../components/bloodbank/BloodBankCampaignsView';
 import { BloodBankProfileView } from '../components/bloodbank/BloodBankProfileView';
 import { BloodBankTransactionsView } from '../components/bloodbank/BloodBankTransactionsView';
+import { BloodBankReportsView } from '../components/bloodbank/BloodBankReportsView';
 
 // Admin Views
 import { AdminDashboard } from '../components/admin/AdminDashboard';
@@ -124,6 +127,9 @@ export const MainLayout: React.FC = () => {
           {activeTab === 'user-hospitals' && <NearbyHospitals />}
           {activeTab === 'user-bloodbanks' && <NearbyBloodBanks />}
           {activeTab === 'user-campaigns' && <CampaignsFeed />}
+          {activeTab === 'user-reports' && (
+            <UserReportsView onNavigateTab={(tab) => setActiveTab(tab)} />
+          )}
           {activeTab === 'user-profile' && (
             <UserProfileView onNavigateTab={(tab) => setActiveTab(tab)} />
           )}
@@ -146,7 +152,7 @@ export const MainLayout: React.FC = () => {
             <HospitalBloodBanksView onNavigateTab={(tab) => setActiveTab(tab)} />
           )}
           {activeTab === 'hosp-reports' && (
-            <AdminDashboard onNavigateTab={setActiveTab} subTab="reports" />
+            <HospitalReportsView onNavigateTab={(tab) => setActiveTab(tab)} />
           )}
           {activeTab === 'hosp-profile' && (
             <HospitalProfileView onNavigateTab={(tab) => setActiveTab(tab)} />
@@ -170,6 +176,9 @@ export const MainLayout: React.FC = () => {
           )}
           {activeTab === 'bb-campaigns' && (
             <BloodBankCampaignsView onNavigateTab={(tab) => setActiveTab(tab)} />
+          )}
+          {activeTab === 'bb-reports' && (
+            <BloodBankReportsView onNavigateTab={(tab) => setActiveTab(tab)} />
           )}
           {activeTab === 'bb-profile' && (
             <BloodBankProfileView onNavigateTab={(tab) => setActiveTab(tab)} />

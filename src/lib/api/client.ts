@@ -366,6 +366,7 @@ class ApiClient {
   reports = {
     fileReport: (data: any) =>
       this.request('/reports', { method: 'POST', body: JSON.stringify(data) }),
+    getMyReports: () => this.request('/reports/my-reports'),
   };
 
   admin = {

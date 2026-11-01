@@ -12,6 +12,7 @@ import {
   FileCheck2,
   Users,
   ShieldCheck,
+  ShieldAlert,
   FileText,
   Activity,
   LogOut,
@@ -54,6 +55,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'user-hospitals', label: 'Nearby Hospitals', icon: Building2 },
     { id: 'user-bloodbanks', label: 'Nearby Blood Banks', icon: Warehouse },
     { id: 'user-campaigns', label: 'Campaigns', icon: Calendar },
+    { id: 'user-reports', label: 'Incident Reports', icon: ShieldAlert },
     { id: 'user-profile', label: 'My Profile', icon: User },
   ];
 
@@ -64,6 +66,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'hosp-tracking', label: 'Request Tracking', icon: Activity },
     { id: 'hosp-donors', label: 'Pending Donors', icon: Users },
     { id: 'hosp-bloodbanks', label: 'Blood Banks', icon: Warehouse },
+    { id: 'hosp-reports', label: 'Incident Reports', icon: ShieldAlert },
     { id: 'hosp-profile', label: 'Hospital Profile', icon: Building2 },
   ];
 
@@ -74,6 +77,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'bb-requests', label: 'Blood Requests', icon: AlertCircle },
     { id: 'bb-donations', label: 'Walk-In Donations', icon: HeartHandshake },
     { id: 'bb-campaigns', label: 'Campaigns', icon: Calendar },
+    { id: 'bb-reports', label: 'Incident Reports', icon: ShieldAlert },
     { id: 'bb-profile', label: 'Blood Bank Profile', icon: Warehouse },
   ];
 

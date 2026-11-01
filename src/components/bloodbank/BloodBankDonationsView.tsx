@@ -19,8 +19,10 @@ import {
   FileText,
   UserCheck,
   Award,
+  ShieldAlert,
 } from 'lucide-react';
 import { formatDateTime } from '../../utils/formatters';
+import { ReportDonorModal } from '../hospital/ReportDonorModal';
 
 interface BloodBankDonationsViewProps {
   onNavigateTab: (tabId: string) => void;
@@ -107,7 +109,7 @@ export const BloodBankDonationsView: React.FC<BloodBankDonationsViewProps> = ({
     },
   ]);
 
-
+  const [reportDonorData, setReportDonorData] = useState<{ donorId: string } | null>(null);
 
   const filteredLogs = donationLogs.filter((log) => {
     if (selectedGroupFilter !== 'ALL' && log.bloodGroup !== selectedGroupFilter) {
@@ -266,6 +268,7 @@ export const BloodBankDonationsView: React.FC<BloodBankDonationsViewProps> = ({
                   <th className="py-3.5 px-4">Phlebotomist</th>
                   <th className="py-3.5 px-4">Intake Time</th>
                   <th className="py-3.5 px-4">Status</th>
+                  <th className="py-3.5 px-4 text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -303,6 +306,16 @@ export const BloodBankDonationsView: React.FC<BloodBankDonationsViewProps> = ({
                         Stored in Inventory
                       </span>
                     </td>
+                    <td className="py-4 px-4 text-right">
+                      <button
+                        onClick={() => setReportDonorData({ donorId: log.donorId })}
+                        className="text-slate-400 hover:text-rose-600 font-bold text-[11px] inline-flex items-center gap-1 transition-colors"
+                        title="Report screening falsification or donor incident"
+                      >
+                        <ShieldAlert className="w-3.5 h-3.5" />
+                        Report
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -311,7 +324,13 @@ export const BloodBankDonationsView: React.FC<BloodBankDonationsViewProps> = ({
         )}
       </div>
 
-
+      {/* Incident Report Modal */}
+      <ReportDonorModal
+        isOpen={!!reportDonorData}
+        onClose={() => setReportDonorData(null)}
+        initialDonorId={reportDonorData?.donorId}
+        facilityType="Blood Bank"
+      />
     </div>
   );
 };

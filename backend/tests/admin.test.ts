@@ -69,5 +69,15 @@ describe('Administrator Authorization & Moderation Tests', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.data.user.status).toBe('SUSPENDED');
+
+    // Verify login is immediately rejected
+    const loginRes = await request
+      .post('/api/v1/auth/login')
+      .send({
+        identifier: donorUser.phone,
+        password: 'LifeDrop@2026!',
+      });
+    expect(loginRes.status).toBe(403);
+    expect(loginRes.body.message).toContain('suspended');
   });
 });

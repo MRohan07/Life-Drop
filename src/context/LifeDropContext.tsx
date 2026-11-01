@@ -138,7 +138,7 @@ interface LifeDropContextType {
   ) => { success: boolean; message: string };
   submitReport: (data: {
     reportedUserId: string;
-    requestId: string;
+    requestId?: string;
     reason: UserReport['reason'];
     description: string;
   }) => void;
@@ -2318,21 +2318,39 @@ export const LifeDropProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       .catch((err) => console.warn('Backend createCampaign error:', err));
   };
 
-  // 14. Hospital Reporting a Donor
+  // 14. Incident / Misconduct Reporting
   const submitReport = (data: {
     reportedUserId: string;
-    requestId: string;
+    requestId?: string;
     reason: UserReport['reason'];
     description: string;
   }) => {
     const targetUser = users.find((u) => u.id === data.reportedUserId);
+    const reporterName =
+      currentRole === 'HOSPITAL'
+        ? currentHospital.name
+        : currentRole === 'BLOOD_BANK'
+        ? `${currentBloodBank.name} (Blood Bank)`
+        : currentRole === 'USER'
+        ? `${currentUser.name} (Donor)`
+        : 'System Administrator';
+
+    const reporterId =
+      currentRole === 'HOSPITAL'
+        ? currentHospital.id
+        : currentRole === 'BLOOD_BANK'
+        ? currentBloodBank.id
+        : currentRole === 'USER'
+        ? currentUser.id
+        : 'ADMIN';
+
     const newReport: UserReport = {
       id: `REP-${Date.now().toString().slice(-4)}`,
-      reporterHospitalId: currentHospital.id,
-      reporterHospitalName: currentHospital.name,
+      reporterHospitalId: reporterId,
+      reporterHospitalName: reporterName,
       reportedUserId: data.reportedUserId,
-      reportedUserName: targetUser?.name || 'Unknown User',
-      requestId: data.requestId,
+      reportedUserName: targetUser?.name || data.reportedUserId || 'Reported Entity',
+      requestId: data.requestId || 'N/A',
       reason: data.reason,
       description: data.description,
       status: 'PENDING',
@@ -2341,20 +2359,22 @@ export const LifeDropProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setReports((prev) => [newReport, ...prev]);
     logAudit(
       'REPORT_SUBMITTED',
-      `Hospital ${currentHospital.name} filed report against ${targetUser?.name || data.reportedUserId} for "${data.reason}".`,
-      currentHospital.name,
+      `${reporterName} filed report against ${targetUser?.name || data.reportedUserId} for "${data.reason}".`,
+      reporterName,
       newReport.id
     );
 
-    // Call PostgreSQL API backend
-    api.reports
-      .fileReport({
-        reportedUserId: data.reportedUserId,
-        requestId: data.requestId,
-        reason: data.reason,
-        description: data.description,
-      })
-      .catch((err) => console.warn('Backend submitReport error:', err));
+    // Call PostgreSQL API backend if hospital
+    if (currentRole === 'HOSPITAL' && currentHospital.id) {
+      api.reports
+        .fileReport({
+          reportedUserId: data.reportedUserId,
+          requestId: data.requestId,
+          reason: data.reason,
+          description: data.description,
+        })
+        .catch((err) => console.warn('Backend submitReport error:', err));
+    }
   };
 
   // 15. Hospital Close Request
