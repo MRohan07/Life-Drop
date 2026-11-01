@@ -69,7 +69,7 @@ services:
 
     envVars:
       - key: VITE_API_BASE_URL
-        value: https://lifedrop-api.onrender.com/api/v1
+        value: https://lifedrop-api-pi7t.onrender.com/api/v1
 
     routes:
       - type: rewrite
