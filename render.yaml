@@ -31,9 +31,6 @@ services:
           name: lifedrop-db
           property: connectionString
 
-      - key: PORT
-        value: "10000"
-
       - key: FRONTEND_URL
         sync: false
 
@@ -69,8 +66,6 @@ services:
 
     buildCommand: npm ci && npm run build
     staticPublishPath: ./dist
-
-    plan: free
 
     envVars:
       - key: VITE_API_BASE_URL
