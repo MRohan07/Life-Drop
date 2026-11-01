@@ -43,3 +43,4 @@ backend/.env
 
 # macOS archive metadata
 __MACOSX/
+frontend/node_modules/
