@@ -55,7 +55,6 @@ services:
       - key: LOG_LEVEL
         value: info
 
-
   # --------------------------------------------------
   # 2. FRONTEND - React Static Site
   # --------------------------------------------------
@@ -69,13 +68,12 @@ services:
 
     envVars:
       - key: VITE_API_BASE_URL
-        value: https://lifedrop-api-pi7t.onrender.com/api/v1
+        value: https://lifedrop-api-p1t7.onrender.com/api/v1
 
     routes:
       - type: rewrite
         source: /*
         destination: /index.html
-
 
 # --------------------------------------------------
 # 3. DATABASE - PostgreSQL
