@@ -1,6 +1,6 @@
 import { prisma } from '../../config/database.js';
 import { AppError } from '../../common/errors/AppError.js';
-import { AppointmentStatus } from '@prisma/client';
+import { AppointmentStatus, UserRole } from '@prisma/client';
 
 export class AppointmentsService {
   async bookAppointment(userId: string, data: { bloodBankId: string; date: string; timeSlot: string }) {
@@ -116,7 +116,14 @@ export class AppointmentsService {
     });
   }
 
-  async updateStatus(id: string, status: AppointmentStatus, staffUserId?: string, units: number = 1) {
+  async updateStatus(
+    id: string,
+    status: AppointmentStatus,
+    staffUserId?: string,
+    units: number = 1,
+    bloodBankId?: string,
+    userRole?: UserRole
+  ) {
     const appointment = await prisma.donationAppointment.findUnique({
       where: { id },
       include: {
@@ -125,6 +132,10 @@ export class AppointmentsService {
       },
     });
     if (!appointment) throw AppError.notFound('Appointment not found');
+
+    if (userRole === UserRole.BLOOD_BANK && bloodBankId && appointment.bloodBankId !== bloodBankId) {
+      throw AppError.forbidden('You can only update appointments for your own blood bank facility');
+    }
 
     if (status === AppointmentStatus.COMPLETED && appointment.status !== AppointmentStatus.COMPLETED) {
       return await prisma.$transaction(async (tx) => {

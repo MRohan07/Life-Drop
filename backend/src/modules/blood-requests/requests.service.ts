@@ -1005,7 +1005,7 @@ export class RequestsService {
   /**
    * Cancel blood request (by Hospital or Admin)
    */
-  async cancelRequest(requestId: string, actorId: string, actorRole: UserRole, reason?: string) {
+  async cancelRequest(requestId: string, actorId: string, actorRole: UserRole, reason?: string, hospitalId?: string) {
     return await prisma.$transaction(async (tx) => {
       const request = await tx.bloodRequest.findUnique({
         where: { id: requestId },
@@ -1015,6 +1015,10 @@ export class RequestsService {
         },
       });
       if (!request) throw AppError.notFound('Blood request not found');
+
+      if (actorRole === UserRole.HOSPITAL && hospitalId && request.hospitalId !== hospitalId) {
+        throw AppError.forbidden('You can only cancel requisitions created by your own hospital');
+      }
 
       // Release active donors
       for (const d of request.donorContributions) {
@@ -1077,9 +1081,13 @@ export class RequestsService {
   /**
    * Mark request fully completed/fulfilled
    */
-  async fulfillRequest(requestId: string) {
+  async fulfillRequest(requestId: string, actorRole?: UserRole, hospitalId?: string) {
     const request = await prisma.bloodRequest.findUnique({ where: { id: requestId } });
     if (!request) throw AppError.notFound('Request not found');
+
+    if (actorRole === UserRole.HOSPITAL && hospitalId && request.hospitalId !== hospitalId) {
+      throw AppError.forbidden('You can only fulfill requisitions created by your own hospital');
+    }
 
     if (request.confirmedUnits < request.requiredUnits) {
       throw AppError.badRequest(

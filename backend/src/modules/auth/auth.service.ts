@@ -110,78 +110,27 @@ export class AuthService {
       });
 
       // Role-specific setup
-      if (data.role === UserRole.USER) {
-        const bg = data.bloodGroup || BloodGroup.O_POS;
-        await tx.donorProfile.create({
-          data: {
-            userId: user.id,
-            bloodGroup: bg,
-            isEligible: true,
-            availability: {
-              create: {
-                isAvailable: true,
-                preferredRadiusKm: 25.0,
-              },
-            },
-            consent: {
-              create: {
-                sharePhoneWithHospitals: true,
-                allowEmergencyRadar: true,
-                allowSmsNotifications: true,
-              },
+      const bg = data.bloodGroup || BloodGroup.O_POS;
+      await tx.donorProfile.create({
+        data: {
+          userId: user.id,
+          bloodGroup: bg,
+          isEligible: true,
+          availability: {
+            create: {
+              isAvailable: true,
+              preferredRadiusKm: 25.0,
             },
           },
-        });
-      } else if (data.role === UserRole.HOSPITAL) {
-        await tx.hospital.create({
-          data: {
-            userId: user.id,
-            name: data.name,
-            phone: data.phone,
-            email: data.email || `${user.id}@hospital.lifedrop.io`,
-            address: data.address || data.location || data.city,
-            city: data.city,
-            type: data.hospitalType || 'Private',
-            licenseNumber: data.licenseNumber || `HOSP-AP-${Math.floor(1000 + Math.random() * 9000)}`,
-            latitude: data.latitude || 16.3067,
-            longitude: data.longitude || 80.4365,
-            isVerified: false,
-            status: VerificationStatus.PENDING_APPROVAL,
-          },
-        });
-      } else if (data.role === UserRole.BLOOD_BANK) {
-        const bloodBank = await tx.bloodBank.create({
-          data: {
-            userId: user.id,
-            name: data.name,
-            phone: data.phone,
-            email: data.email || `${user.id}@bloodbank.lifedrop.io`,
-            address: data.address || data.location || data.city,
-            city: data.city,
-            type: data.bloodBankType || 'Private',
-            licenseNumber: data.licenseNumber || `BB-AP-${Math.floor(1000 + Math.random() * 9000)}`,
-            latitude: data.latitude || 16.3067,
-            longitude: data.longitude || 80.4365,
-            isVerified: false,
-            status: VerificationStatus.PENDING_APPROVAL,
-          },
-        });
-
-        // Initialize 8 blood group inventory balances
-        const allGroups = Object.values(BloodGroup);
-        for (const group of allGroups) {
-          await tx.inventoryBalance.create({
-            data: {
-              bloodBankId: bloodBank.id,
-              bloodGroup: group,
-              componentType: ComponentType.RED_BLOOD_CELLS,
-              availableUnits: 5,
-              reservedUnits: 0,
-              suppliedUnits: 0,
+          consent: {
+            create: {
+              sharePhoneWithHospitals: true,
+              allowEmergencyRadar: true,
+              allowSmsNotifications: true,
             },
-          });
-        }
-      }
+          },
+        },
+      });
 
       // Create session
       const accessToken = signAccessToken({
@@ -221,9 +170,13 @@ export class AuthService {
    * Login with identifier (phone or email) and password
    */
   async login(identifier: string, password?: string, role?: UserRole) {
+    const trimmedId = identifier.trim();
     const user = await prisma.user.findFirst({
       where: {
-        OR: [{ phone: identifier }, { email: identifier }],
+        OR: [
+          { phone: trimmedId },
+          { email: { equals: trimmedId, mode: 'insensitive' } },
+        ],
         ...(role ? { role } : {}),
       },
       include: USER_AUTH_INCLUDE,
@@ -234,9 +187,9 @@ export class AuthService {
       const facilityApp = await prisma.facilityApplication.findFirst({
         where: {
           OR: [
-            { email: { equals: identifier, mode: 'insensitive' } },
-            { phone: identifier },
-            { referenceNumber: { equals: identifier, mode: 'insensitive' } },
+            { email: { equals: trimmedId, mode: 'insensitive' } },
+            { phone: trimmedId },
+            { referenceNumber: { equals: trimmedId, mode: 'insensitive' } },
           ],
         },
       });
@@ -251,15 +204,28 @@ export class AuthService {
 
         if (facilityApp.status === 'PENDING' || facilityApp.status === 'UNDER_REVIEW') {
           throw AppError.forbidden(
-            `Application Pending Approval: Your facility application (${facilityApp.referenceNumber}) for "${facilityApp.name}" has been submitted to all platform administrators and is currently under review.`
+            'Your facility registration is awaiting admin approval.',
+            'FACILITY_PENDING_APPROVAL'
           );
         } else if (facilityApp.status === 'NEEDS_INFORMATION') {
           throw AppError.forbidden(
-            `Application Needs Information: Administrator requested additional details for application (${facilityApp.referenceNumber}): "${facilityApp.requestedInfoQuery || ''}". Please use Track Application to respond.`
+            `Administrator requested additional details for application (${facilityApp.referenceNumber}): "${facilityApp.requestedInfoQuery || ''}". Please use Track Application to respond.`,
+            'FACILITY_NEEDS_INFORMATION'
           );
         } else if (facilityApp.status === 'REJECTED') {
           throw AppError.forbidden(
-            `Application Rejected: Your facility application (${facilityApp.referenceNumber}) was not approved. Reason: ${facilityApp.rejectionReason || 'Criteria not met.'}`
+            `Your facility application was rejected: ${facilityApp.rejectionReason || 'Criteria not met.'}`,
+            'FACILITY_REJECTED'
+          );
+        } else if (facilityApp.status === 'SUSPENDED') {
+          throw AppError.forbidden(
+            'Your account has been suspended.',
+            'ACCOUNT_SUSPENDED'
+          );
+        } else if (facilityApp.status === 'APPROVED' && !facilityApp.isActivated) {
+          throw AppError.forbidden(
+            'Your account is awaiting activation.',
+            'ACCOUNT_PENDING_ACTIVATION'
           );
         }
       }
@@ -269,19 +235,15 @@ export class AuthService {
 
     if (user.status === UserStatus.SUSPENDED) {
       throw AppError.forbidden(
-        'Your account has been suspended by system administrator. Operational access has been revoked.'
+        'Your account has been suspended.',
+        'ACCOUNT_SUSPENDED'
       );
     }
 
-    if (user.hospital && (user.hospital.status === VerificationStatus.SUSPENDED || (!user.hospital.isVerified && user.hospital.status === 'REJECTED'))) {
+    if (user.status === UserStatus.PENDING_ACTIVATION) {
       throw AppError.forbidden(
-        'Operational facility access is restricted. Your hospital account has been suspended or revoked by platform administrators.'
-      );
-    }
-
-    if (user.bloodBank && (user.bloodBank.status === VerificationStatus.SUSPENDED || (!user.bloodBank.isVerified && user.bloodBank.status === 'REJECTED'))) {
-      throw AppError.forbidden(
-        'Operational facility access is restricted. Your blood bank account has been suspended or revoked by platform administrators.'
+        'Your account is awaiting activation.',
+        'ACCOUNT_PENDING_ACTIVATION'
       );
     }
 
@@ -289,6 +251,98 @@ export class AuthService {
       const isValid = await verifyPassword(user.passwordHash, password);
       if (!isValid) {
         throw AppError.unauthorized('Invalid password entered');
+      }
+    }
+
+    if (user.role === UserRole.HOSPITAL) {
+      if (!user.hospital) {
+        throw AppError.forbidden(
+          'Your facility registration is awaiting admin approval.',
+          'FACILITY_PENDING_APPROVAL'
+        );
+      }
+      if (user.hospital.status === VerificationStatus.SUSPENDED) {
+        throw AppError.forbidden(
+          'Your account has been suspended.',
+          'ACCOUNT_SUSPENDED'
+        );
+      }
+      if (user.hospital.status === VerificationStatus.REJECTED) {
+        throw AppError.forbidden(
+          'Your facility application was rejected.',
+          'FACILITY_REJECTED'
+        );
+      }
+      if (!user.hospital.isVerified || user.hospital.status === VerificationStatus.PENDING_APPROVAL) {
+        throw AppError.forbidden(
+          'Your facility registration is awaiting admin approval.',
+          'FACILITY_PENDING_APPROVAL'
+        );
+      }
+      if (user.hospital.facilityApplicationId) {
+        const linkedApp = await prisma.facilityApplication.findUnique({
+          where: { id: user.hospital.facilityApplicationId },
+        });
+        if (linkedApp) {
+          if (linkedApp.status === 'SUSPENDED') {
+            throw AppError.forbidden('Your account has been suspended.', 'ACCOUNT_SUSPENDED');
+          }
+          if (linkedApp.status === 'REJECTED') {
+            throw AppError.forbidden(`Your facility application was rejected: ${linkedApp.rejectionReason || 'Criteria not met.'}`, 'FACILITY_REJECTED');
+          }
+          if (linkedApp.status !== 'APPROVED') {
+            throw AppError.forbidden('Your facility registration is awaiting admin approval.', 'FACILITY_PENDING_APPROVAL');
+          }
+          if (!linkedApp.isActivated) {
+            throw AppError.forbidden('Your account is awaiting activation.', 'ACCOUNT_PENDING_ACTIVATION');
+          }
+        }
+      }
+    }
+
+    if (user.role === UserRole.BLOOD_BANK) {
+      if (!user.bloodBank) {
+        throw AppError.forbidden(
+          'Your facility registration is awaiting admin approval.',
+          'FACILITY_PENDING_APPROVAL'
+        );
+      }
+      if (user.bloodBank.status === VerificationStatus.SUSPENDED) {
+        throw AppError.forbidden(
+          'Your account has been suspended.',
+          'ACCOUNT_SUSPENDED'
+        );
+      }
+      if (user.bloodBank.status === VerificationStatus.REJECTED) {
+        throw AppError.forbidden(
+          'Your facility application was rejected.',
+          'FACILITY_REJECTED'
+        );
+      }
+      if (!user.bloodBank.isVerified || user.bloodBank.status === VerificationStatus.PENDING_APPROVAL) {
+        throw AppError.forbidden(
+          'Your facility registration is awaiting admin approval.',
+          'FACILITY_PENDING_APPROVAL'
+        );
+      }
+      if (user.bloodBank.facilityApplicationId) {
+        const linkedApp = await prisma.facilityApplication.findUnique({
+          where: { id: user.bloodBank.facilityApplicationId },
+        });
+        if (linkedApp) {
+          if (linkedApp.status === 'SUSPENDED') {
+            throw AppError.forbidden('Your account has been suspended.', 'ACCOUNT_SUSPENDED');
+          }
+          if (linkedApp.status === 'REJECTED') {
+            throw AppError.forbidden(`Your facility application was rejected: ${linkedApp.rejectionReason || 'Criteria not met.'}`, 'FACILITY_REJECTED');
+          }
+          if (linkedApp.status !== 'APPROVED') {
+            throw AppError.forbidden('Your facility registration is awaiting admin approval.', 'FACILITY_PENDING_APPROVAL');
+          }
+          if (!linkedApp.isActivated) {
+            throw AppError.forbidden('Your account is awaiting activation.', 'ACCOUNT_PENDING_ACTIVATION');
+          }
+        }
       }
     }
 
@@ -456,10 +510,53 @@ export class AuthService {
     }
 
     if (session.user.status === UserStatus.SUSPENDED) {
-      await prisma.refreshSession.deleteMany({
-        where: { userId: session.user.id },
+      await prisma.refreshSession.updateMany({
+        where: { userId: session.user.id, revokedAt: null },
+        data: { revokedAt: new Date() },
       });
-      throw AppError.forbidden('Your account has been suspended by system administrator.');
+      throw AppError.forbidden('Your account has been suspended.', 'ACCOUNT_SUSPENDED');
+    }
+
+    if (session.user.status === UserStatus.PENDING_ACTIVATION) {
+      await prisma.refreshSession.updateMany({
+        where: { userId: session.user.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      throw AppError.forbidden('Your account is awaiting activation.', 'ACCOUNT_PENDING_ACTIVATION');
+    }
+
+    if (session.user.role === UserRole.HOSPITAL) {
+      const hosp = session.user.hospital;
+      if (!hosp || !hosp.isVerified || hosp.status !== VerificationStatus.VERIFIED) {
+        await prisma.refreshSession.updateMany({
+          where: { userId: session.user.id, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+        if (hosp?.status === VerificationStatus.SUSPENDED) {
+          throw AppError.forbidden('Your account has been suspended.', 'ACCOUNT_SUSPENDED');
+        }
+        if (hosp?.status === VerificationStatus.REJECTED) {
+          throw AppError.forbidden('Your facility application was rejected.', 'FACILITY_REJECTED');
+        }
+        throw AppError.forbidden('Your facility registration is awaiting admin approval.', 'FACILITY_PENDING_APPROVAL');
+      }
+    }
+
+    if (session.user.role === UserRole.BLOOD_BANK) {
+      const bb = session.user.bloodBank;
+      if (!bb || !bb.isVerified || bb.status !== VerificationStatus.VERIFIED) {
+        await prisma.refreshSession.updateMany({
+          where: { userId: session.user.id, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+        if (bb?.status === VerificationStatus.SUSPENDED) {
+          throw AppError.forbidden('Your account has been suspended.', 'ACCOUNT_SUSPENDED');
+        }
+        if (bb?.status === VerificationStatus.REJECTED) {
+          throw AppError.forbidden('Your facility application was rejected.', 'FACILITY_REJECTED');
+        }
+        throw AppError.forbidden('Your facility registration is awaiting admin approval.', 'FACILITY_PENDING_APPROVAL');
+      }
     }
 
     // Revoke old session

@@ -29,7 +29,12 @@ export class DonationsController {
     try {
       if (!req.user) throw AppError.unauthorized();
       const { requestId, donorId } = req.body;
-      const result = await donationsService.markNoShow(requestId, donorId);
+      const result = await donationsService.markNoShow(
+        requestId,
+        donorId,
+        req.user.role,
+        req.user.hospitalId
+      );
       res.status(200).json({ status: 'success', message: result.message });
     } catch (err) {
       next(err);
@@ -40,7 +45,13 @@ export class DonationsController {
     try {
       if (!req.user) throw AppError.unauthorized();
       const { requestId, donorId, reason } = req.body;
-      const result = await donationsService.markNotCompleted(requestId, donorId, reason);
+      const result = await donationsService.markNotCompleted(
+        requestId,
+        donorId,
+        reason,
+        req.user.role,
+        req.user.hospitalId
+      );
       res.status(200).json({ status: 'success', message: result.message });
     } catch (err) {
       next(err);

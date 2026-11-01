@@ -56,6 +56,11 @@ export class CampaignsController {
 
   async getRegistrations(req: Request, res: Response, next: NextFunction) {
     try {
+      if (!req.user) throw AppError.unauthorized();
+      const campaign = await campaignsService.getCampaignById(req.params.id);
+      if (req.user.role === 'BLOOD_BANK' && campaign.bloodBankId !== req.user.bloodBankId) {
+        throw AppError.forbidden('You can only view registrations for campaigns organized by your blood bank');
+      }
       const registrations = await campaignsService.getRegistrations(req.params.id);
       res.status(200).json({ status: 'success', results: registrations.length, data: { registrations } });
     } catch (err) {

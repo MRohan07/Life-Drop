@@ -81,7 +81,9 @@ export class AppointmentsController {
         req.params.id,
         status as AppointmentStatus,
         req.user?.id,
-        units ? parseInt(units, 10) : 1
+        units ? parseInt(units, 10) : 1,
+        req.user?.bloodBankId,
+        req.user?.role
       );
       res.status(200).json({ status: 'success', message: 'Status updated', data: { appointment } });
     } catch (err) {

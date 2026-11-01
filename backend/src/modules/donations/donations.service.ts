@@ -218,7 +218,14 @@ export class DonationsService {
   /**
    * Hospital marks committed donor as NO_SHOW
    */
-  async markNoShow(requestId: string, donorId: string) {
+  async markNoShow(requestId: string, donorId: string, actorRole?: UserRole, hospitalId?: string) {
+    const request = await prisma.bloodRequest.findUnique({ where: { id: requestId } });
+    if (!request) throw AppError.notFound('Blood request not found');
+
+    if (actorRole === UserRole.HOSPITAL && hospitalId && request.hospitalId !== hospitalId) {
+      throw AppError.forbidden('You can only manage donors for blood requests belonging to your hospital');
+    }
+
     const donor = await prisma.user.findFirst({
       where: { OR: [{ id: donorId }, { donorProfile: { id: donorId } }] },
       include: { donorProfile: true },
@@ -240,20 +247,17 @@ export class DonationsService {
         data: { activeCommitmentRequestId: null },
       });
 
-      const request = await tx.bloodRequest.findUnique({ where: { id: requestId } });
-      if (request) {
-        const newAllocated = Math.max(0, request.allocatedUnits - 1);
-        const newRemaining = Math.max(0, request.requiredUnits - request.confirmedUnits - newAllocated);
+      const newAllocated = Math.max(0, request.allocatedUnits - 1);
+      const newRemaining = Math.max(0, request.requiredUnits - request.confirmedUnits - newAllocated);
 
-        await tx.bloodRequest.update({
-          where: { id: requestId },
-          data: {
-            allocatedUnits: newAllocated,
-            remainingUnits: newRemaining,
-            status: request.confirmedUnits > 0 ? RequestStatus.PARTIALLY_FULFILLED : RequestStatus.SEARCHING,
-          },
-        });
-      }
+      await tx.bloodRequest.update({
+        where: { id: requestId },
+        data: {
+          allocatedUnits: newAllocated,
+          remainingUnits: newRemaining,
+          status: request.confirmedUnits > 0 ? RequestStatus.PARTIALLY_FULFILLED : RequestStatus.SEARCHING,
+        },
+      });
 
       return { success: true, message: 'Donor commitment released. Radar resumed.' };
     });
@@ -262,7 +266,14 @@ export class DonationsService {
   /**
    * Hospital marks donor NOT_COMPLETED (clinical deferral, e.g. low hemoglobin)
    */
-  async markNotCompleted(requestId: string, donorId: string, reason: string) {
+  async markNotCompleted(requestId: string, donorId: string, reason: string, actorRole?: UserRole, hospitalId?: string) {
+    const request = await prisma.bloodRequest.findUnique({ where: { id: requestId } });
+    if (!request) throw AppError.notFound('Blood request not found');
+
+    if (actorRole === UserRole.HOSPITAL && hospitalId && request.hospitalId !== hospitalId) {
+      throw AppError.forbidden('You can only manage donors for blood requests belonging to your hospital');
+    }
+
     const donor = await prisma.user.findFirst({
       where: { OR: [{ id: donorId }, { donorProfile: { id: donorId } }] },
       include: { donorProfile: true },
@@ -286,20 +297,17 @@ export class DonationsService {
         data: { activeCommitmentRequestId: null },
       });
 
-      const request = await tx.bloodRequest.findUnique({ where: { id: requestId } });
-      if (request) {
-        const newAllocated = Math.max(0, request.allocatedUnits - 1);
-        const newRemaining = Math.max(0, request.requiredUnits - request.confirmedUnits - newAllocated);
+      const newAllocated = Math.max(0, request.allocatedUnits - 1);
+      const newRemaining = Math.max(0, request.requiredUnits - request.confirmedUnits - newAllocated);
 
-        await tx.bloodRequest.update({
-          where: { id: requestId },
-          data: {
-            allocatedUnits: newAllocated,
-            remainingUnits: newRemaining,
-            status: request.confirmedUnits > 0 ? RequestStatus.PARTIALLY_FULFILLED : RequestStatus.SEARCHING,
-          },
-        });
-      }
+      await tx.bloodRequest.update({
+        where: { id: requestId },
+        data: {
+          allocatedUnits: newAllocated,
+          remainingUnits: newRemaining,
+          status: request.confirmedUnits > 0 ? RequestStatus.PARTIALLY_FULFILLED : RequestStatus.SEARCHING,
+        },
+      });
 
       return { success: true, message: 'Clinical deferral noted. Donor slot released.' };
     });

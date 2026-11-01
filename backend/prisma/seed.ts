@@ -1,26 +1,50 @@
-import { PrismaClient, BloodGroup, UserRole, EmergencyLevel, RequestStatus, DonorResponseStatus, BloodBankResponseStatus, VerificationStatus, ComponentType } from '@prisma/client';
+import { PrismaClient, BloodGroup, UserRole, VerificationStatus, UserStatus } from '@prisma/client';
 import argon2 from 'argon2';
 
 const prisma = new PrismaClient();
 
-const bloodGroupMap: Record<string, BloodGroup> = {
-  'A+': BloodGroup.A_POS,
-  'A-': BloodGroup.A_NEG,
-  'B+': BloodGroup.B_POS,
-  'B-': BloodGroup.B_NEG,
-  'AB+': BloodGroup.AB_POS,
-  'AB-': BloodGroup.AB_NEG,
-  'O+': BloodGroup.O_POS,
-  'O-': BloodGroup.O_NEG,
-};
 
 async function main() {
   console.log('🌱 Starting LifeDrop database seeding...');
 
-  // Common hashed password for all initial demo accounts
-  const defaultPasswordHash = await argon2.hash('LifeDrop@2026!');
-  const adminPasswordHash = await argon2.hash('Admin@123');
-  const adminPasskeyHash = await argon2.hash('901234');
+  // Seed credentials: development fallbacks are allowed only outside production.
+  // Production seeding must use explicitly configured secrets.
+  const isProduction = process.env.NODE_ENV === 'production';
+
+  function getSeedSecret(name: string, developmentFallback: string): string {
+    const value = process.env[name]?.trim();
+
+    if (isProduction && !value) {
+      throw new Error(
+        `Missing required production environment variable: ${name}. Seeding has been stopped.`
+      );
+    }
+
+    if (!isProduction && !value) {
+      console.warn(
+        `⚠️ ${name} is not set. Using the development-only fallback.`
+      );
+    }
+
+    return value || developmentFallback;
+  }
+
+  const defaultPassword = getSeedSecret(
+    'SEED_DEFAULT_PASSWORD',
+    'LifeDrop@2026!'
+  );
+  const adminPassword = getSeedSecret(
+    'SEED_ADMIN_PASSWORD',
+    'Admin@123'
+  );
+  const adminPasskey = getSeedSecret(
+    'ADMIN_PASSKEY_PIN',
+    '222005'
+  );
+
+  const defaultPasswordHash = await argon2.hash(defaultPassword);
+  const adminPasswordHash = await argon2.hash(adminPassword);
+  const adminPasskeyHash = await argon2.hash(adminPasskey);
 
   // 1. Seed Admin Users & Profiles
   console.log('Creating Admin Users...');
@@ -56,7 +80,7 @@ async function main() {
       name: 'Dr. Rajesh Varma',
       email: 'admin.rajesh@lifedrop.io',
       phone: '9848011223',
-      passwordHash: defaultPasswordHash,
+      passwordHash: adminPasswordHash,
       role: UserRole.ADMIN,
       city: 'Guntur',
       location: 'State Transfusion HQ, Guntur',
@@ -69,12 +93,7 @@ async function main() {
   for (const adm of adminAccounts) {
     await prisma.user.upsert({
       where: { id: adm.id },
-      update: {
-        email: adm.email,
-        passwordHash: adm.passwordHash,
-        role: adm.role,
-        name: adm.name,
-      },
+      update: {},
       create: {
         id: adm.id,
         name: adm.name,
@@ -225,7 +244,7 @@ async function main() {
     {
       id: 'LD-HOSP-01',
       userId: 'USER-HOSP-01',
-      name: 'Government General Hospital (GGH), Guntur',
+      name: '[DEMO - PENDING APPROVAL] Government General Hospital (GGH), Guntur',
       type: 'Government',
       registrationNumber: 'HOSP-AP-GGH-001',
       address: 'Kanna Vari Thota, Opposite Guntur Medical College',
@@ -240,12 +259,18 @@ async function main() {
       licenseNumber: 'HOSP-AP-2024-8891',
       latitude: 16.2995,
       longitude: 80.443,
-      services: ['24/7 Level 1 Emergency & Trauma Care', 'Blood Transfusion Wing', 'Cardiothoracic ICU', 'Pediatric Surgery', 'Dialysis Center'],
+      services: [
+        '24/7 Level 1 Emergency & Trauma Care',
+        'Blood Transfusion Wing',
+        'Cardiothoracic ICU',
+        'Pediatric Surgery',
+        'Dialysis Center',
+      ],
     },
     {
       id: 'LD-HOSP-02',
       userId: 'USER-HOSP-02',
-      name: 'Ramesh Hospitals, Guntur',
+      name: '[DEMO - PENDING APPROVAL] Ramesh Hospitals, Guntur',
       type: 'Private',
       registrationNumber: 'HOSP-AP-RMH-104',
       address: 'Near Collector Office, Ring Road, Nagarampalem',
@@ -260,12 +285,17 @@ async function main() {
       licenseNumber: 'HOSP-AP-2023-4120',
       latitude: 16.3082,
       longitude: 80.4358,
-      services: ['24/7 Cardiac Emergency', 'Critical Care & Neuro Trauma', 'Oncology Care', 'Hemophilia & Blood Bank Wing'],
+      services: [
+        '24/7 Cardiac Emergency',
+        'Critical Care & Neuro Trauma',
+        'Oncology Care',
+        'Hemophilia & Blood Bank Wing',
+      ],
     },
     {
       id: 'LD-HOSP-03',
       userId: 'USER-HOSP-03',
-      name: 'NRI General Hospital & Medical College',
+      name: '[DEMO - PENDING APPROVAL] NRI General Hospital & Medical College',
       type: 'Trust / NGO',
       registrationNumber: 'HOSP-AP-NRI-208',
       address: 'National Highway 16, Mangalagiri Road, Chinakakani',
@@ -280,14 +310,27 @@ async function main() {
       licenseNumber: 'HOSP-AP-2025-9011',
       latitude: 16.425,
       longitude: 80.563,
-      services: ['Multi-Speciality Trauma Center', 'Organ Transplant Unit', 'Neonatal ICU', 'Advanced Blood Bank'],
+      services: [
+        'Multi-Speciality Trauma Center',
+        'Organ Transplant Unit',
+        'Neonatal ICU',
+        'Advanced Blood Bank',
+      ],
     },
   ];
 
   for (const h of hospitalData) {
     await prisma.user.upsert({
       where: { id: h.userId },
-      update: {},
+      update: {
+        status: UserStatus.PENDING_ACTIVATION,
+        hospital: {
+          update: {
+            isVerified: false,
+            status: VerificationStatus.PENDING_APPROVAL,
+          },
+        },
+      },
       create: {
         id: h.userId,
         name: h.name,
@@ -295,6 +338,7 @@ async function main() {
         email: h.email,
         passwordHash: defaultPasswordHash,
         role: UserRole.HOSPITAL,
+        status: UserStatus.PENDING_ACTIVATION,
         city: h.city,
         location: h.address,
         latitude: h.latitude,
@@ -318,21 +362,24 @@ async function main() {
             longitude: h.longitude,
             services: h.services,
             licenseNumber: h.licenseNumber,
-            isVerified: true,
-            status: VerificationStatus.VERIFIED,
+            // Hospital requires admin approval
+            isVerified: false,
+            status: VerificationStatus.PENDING_APPROVAL,
           },
         },
       },
     });
   }
 
-  // 4. Seed Blood Banks & Component Inventories
-  console.log('Creating Blood Banks & Inventories...');
+  // These demo facilities are deliberately created as pending and have no inventory.
+  // Do not add stock, requests, or campaigns until an administrator approves a facility.
+  // 4. Seed Demo Blood Banks (Pending Approval)
+  console.log('Creating Demo Blood Banks (Pending Approval)...');
   const bloodBankData = [
     {
       id: 'LD-BB-01',
       userId: 'USER-BB-01',
-      name: 'Indian Red Cross Society Blood Bank, Guntur',
+      name: '[DEMO - PENDING APPROVAL] Indian Red Cross Society Blood Bank, Guntur',
       type: 'NGO / Trust',
       registrationNumber: 'BB-AP-GNT-101',
       address: 'Collectorate Compound, Kanna Vari Thota',
@@ -345,22 +392,12 @@ async function main() {
       image: 'https://images.unsplash.com/photo-1615461066841-6116e61058f4?w=600&auto=format&fit=crop&q=80',
       licenseNumber: 'BB-AP-GNT-2023-1029',
       latitude: 16.301,
-      longitude: 80.4418,
-      stock: [
-        { group: BloodGroup.O_POS, available: 14, reserved: 2, supplied: 85 },
-        { group: BloodGroup.O_NEG, available: 4, reserved: 0, supplied: 38 },
-        { group: BloodGroup.A_POS, available: 16, reserved: 1, supplied: 92 },
-        { group: BloodGroup.A_NEG, available: 5, reserved: 0, supplied: 28 },
-        { group: BloodGroup.B_POS, available: 18, reserved: 1, supplied: 79 },
-        { group: BloodGroup.B_NEG, available: 4, reserved: 0, supplied: 24 },
-        { group: BloodGroup.AB_POS, available: 8, reserved: 0, supplied: 35 },
-        { group: BloodGroup.AB_NEG, available: 2, reserved: 0, supplied: 14 },
-      ],
+      longitude: 80.4418
     },
     {
       id: 'LD-BB-02',
       userId: 'USER-BB-02',
-      name: 'Rotary Club of Guntur Blood Bank',
+      name: '[DEMO - PENDING APPROVAL] Rotary Club of Guntur Blood Bank',
       type: 'NGO / Trust',
       registrationNumber: 'BB-AP-GNT-202',
       address: '4th Lane, Main Road, Brodipet',
@@ -373,24 +410,22 @@ async function main() {
       image: 'https://images.unsplash.com/photo-1579684385127-1ef15d508118?w=600&auto=format&fit=crop&q=80',
       licenseNumber: 'BB-AP-GNT-2024-5501',
       latitude: 16.3075,
-      longitude: 80.434,
-      stock: [
-        { group: BloodGroup.O_POS, available: 18, reserved: 0, supplied: 110 },
-        { group: BloodGroup.O_NEG, available: 3, reserved: 0, supplied: 42 },
-        { group: BloodGroup.A_POS, available: 15, reserved: 0, supplied: 80 },
-        { group: BloodGroup.A_NEG, available: 3, reserved: 0, supplied: 22 },
-        { group: BloodGroup.B_POS, available: 12, reserved: 0, supplied: 65 },
-        { group: BloodGroup.B_NEG, available: 3, reserved: 0, supplied: 18 },
-        { group: BloodGroup.AB_POS, available: 6, reserved: 0, supplied: 30 },
-        { group: BloodGroup.AB_NEG, available: 1, reserved: 0, supplied: 10 },
-      ],
+      longitude: 80.434
     },
   ];
 
   for (const bb of bloodBankData) {
-    const user = await prisma.user.upsert({
+    await prisma.user.upsert({
       where: { id: bb.userId },
-      update: {},
+      update: {
+        status: UserStatus.PENDING_ACTIVATION,
+        bloodBank: {
+          update: {
+            isVerified: false,
+            status: VerificationStatus.PENDING_APPROVAL,
+          },
+        },
+      },
       create: {
         id: bb.userId,
         name: bb.name,
@@ -398,6 +433,7 @@ async function main() {
         email: bb.email,
         passwordHash: defaultPasswordHash,
         role: UserRole.BLOOD_BANK,
+        status: UserStatus.PENDING_ACTIVATION,
         city: bb.city,
         location: bb.address,
         latitude: bb.latitude,
@@ -419,226 +455,13 @@ async function main() {
             latitude: bb.latitude,
             longitude: bb.longitude,
             licenseNumber: bb.licenseNumber,
-            isVerified: true,
-            status: VerificationStatus.VERIFIED,
+            isVerified: false,
+            status: VerificationStatus.PENDING_APPROVAL,
           },
         },
       },
     });
-
-    // Populate lots and maintained balance per blood group
-    for (const item of bb.stock) {
-      await prisma.inventoryBalance.upsert({
-        where: {
-          bloodBankId_bloodGroup_componentType: {
-            bloodBankId: bb.id,
-            bloodGroup: item.group,
-            componentType: ComponentType.RED_BLOOD_CELLS,
-          },
-        },
-        update: {},
-        create: {
-          bloodBankId: bb.id,
-          bloodGroup: item.group,
-          componentType: ComponentType.RED_BLOOD_CELLS,
-          availableUnits: item.available,
-          reservedUnits: item.reserved,
-          suppliedUnits: item.supplied,
-        },
-      });
-
-      // Create an active lot for this stock
-      await prisma.inventoryLot.create({
-        data: {
-          bloodBankId: bb.id,
-          bloodGroup: item.group,
-          componentType: ComponentType.RED_BLOOD_CELLS,
-          batchNumber: `LOT-2026-${bb.id}-${item.group}`,
-          initialUnits: item.available + item.reserved,
-          availableUnits: item.available,
-          reservedUnits: item.reserved,
-          suppliedUnits: item.supplied,
-          collectionDate: new Date('2026-08-01'),
-          expiryDate: new Date('2026-09-12'), // 42-day RBC viability
-          status: 'AVAILABLE',
-        },
-      });
-    }
   }
-
-  // 5. Seed Blood Requests
-  console.log('Creating Blood Requests...');
-  const req1 = await prisma.bloodRequest.upsert({
-    where: { id: 'LD1025' },
-    update: {},
-    create: {
-      id: 'LD1025',
-      hospitalId: 'LD-HOSP-01',
-      patientName: 'Ravi Teja (Trauma Ward, Bed 12)',
-      bloodGroup: BloodGroup.O_POS,
-      componentType: ComponentType.RED_BLOOD_CELLS,
-      requiredUnits: 2,
-      allocatedUnits: 0,
-      confirmedUnits: 0,
-      remainingUnits: 2,
-      emergencyLevel: EmergencyLevel.CRITICAL,
-      requiredDateTime: new Date('2026-08-26T21:00:00Z'),
-      contactNumber: '9848011299',
-      notes: 'Emergency surgery scheduled for road traffic accident trauma.',
-      status: RequestStatus.SEARCHING,
-      timeline: [
-        {
-          title: 'Emergency Request Created',
-          timestamp: '2026-08-26 17:30',
-          description: 'GGH Guntur initiated emergency request for 2 units of O+ blood.',
-          type: 'creation',
-        },
-        {
-          title: 'Radar Broadcast Initiated',
-          timestamp: '2026-08-26 17:30',
-          description: 'Searching compatible nearby donors and registered blood banks in Guntur region.',
-          type: 'match',
-        },
-      ],
-    },
-  });
-
-  const req2 = await prisma.bloodRequest.upsert({
-    where: { id: 'LD1026' },
-    update: {},
-    create: {
-      id: 'LD1026',
-      hospitalId: 'LD-HOSP-02',
-      patientName: 'Sita Ramam (ICU Bed 4)',
-      bloodGroup: BloodGroup.B_POS,
-      componentType: ComponentType.RED_BLOOD_CELLS,
-      requiredUnits: 3,
-      allocatedUnits: 1,
-      confirmedUnits: 1,
-      remainingUnits: 1,
-      emergencyLevel: EmergencyLevel.URGENT,
-      requiredDateTime: new Date('2026-08-27T10:00:00Z'),
-      contactNumber: '9848022444',
-      notes: 'Severe cardiac post-operative recovery. Transfusion required.',
-      status: RequestStatus.PARTIALLY_FULFILLED,
-      timeline: [
-        {
-          title: 'Request Created',
-          timestamp: '2026-08-26 15:00',
-          description: 'Ramesh Hospitals requested 3 units of B+ blood.',
-          type: 'creation',
-        },
-        {
-          title: 'Donor Sahith Ram Donated 1 Unit',
-          timestamp: '2026-08-26 16:45',
-          description: 'Hospital verified and confirmed 1 unit from donor Sahith Ram.',
-          type: 'fulfilment',
-        },
-      ],
-      donorContributions: {
-        create: {
-          donorProfile: {
-            connect: { userId: 'LD-DON-1047' },
-          },
-          status: DonorResponseStatus.COMPLETED,
-          units: 1,
-          acceptedAt: new Date('2026-08-26T15:20:00Z'),
-          confirmedAt: new Date('2026-08-26T16:45:00Z'),
-        },
-      },
-      bloodBankContributions: {
-        create: {
-          bloodBankId: 'LD-BB-01',
-          bloodGroup: BloodGroup.B_POS,
-          offeredUnits: 1,
-          allocatedUnits: 1,
-          status: BloodBankResponseStatus.RESERVED,
-        },
-      },
-    },
-  });
-
-  // 6. Seed Campaigns
-  console.log('Creating Campaigns...');
-  await prisma.campaign.upsert({
-    where: { id: 'CAMP-01' },
-    update: {},
-    create: {
-      id: 'CAMP-01',
-      name: 'Guntur Mega Blood Donation Drive 2026',
-      bloodBankId: 'LD-BB-01',
-      image: 'https://images.unsplash.com/photo-1536856136534-bb679c52a9aa?w=600&auto=format&fit=crop&q=80',
-      date: new Date('2026-09-05'),
-      timeSlot: '09:00 AM - 05:00 PM',
-      location: 'Guntur Municipal Corporation Hall, Brodipet',
-      city: 'Guntur',
-      latitude: 16.305,
-      longitude: 80.437,
-      description: 'Join hundreds of donors for our Guntur community life-saving camp. Free health check-up, donor kit, and refreshments provided.',
-      googleFormUrl: 'https://forms.google.com/example-lifedrop-camp-01',
-      targetUnits: 100,
-    },
-  });
-
-  await prisma.campaign.upsert({
-    where: { id: 'CAMP-02' },
-    update: {},
-    create: {
-      id: 'CAMP-02',
-      name: 'Rotary Youth Blood Donation Camp',
-      bloodBankId: 'LD-BB-02',
-      image: 'https://images.unsplash.com/photo-1579154204601-01588f351e67?w=600&auto=format&fit=crop&q=80',
-      date: new Date('2026-09-12'),
-      timeSlot: '10:00 AM - 04:00 PM',
-      location: 'Rotary Community Center, Arundelpet, Guntur',
-      city: 'Guntur',
-      latitude: 16.302,
-      longitude: 80.441,
-      description: 'Special youth-led donor awareness drive in partnership with local collegiate volunteers.',
-      googleFormUrl: 'https://forms.google.com/example-lifedrop-camp-02',
-      targetUnits: 80,
-    },
-  });
-
-  // 7. Seed Feedback & Testimonials
-  console.log('Creating Feedback Submissions...');
-  await prisma.feedbackSubmission.create({
-    data: {
-      userId: 'LD-DON-1045',
-      rating: 5,
-      comments: 'The radar emergency alert notified me within seconds. Hospital staff verified my donor badge promptly and the whole donation was smooth and painless.',
-      status: 'RESOLVED',
-      adminReplyMessage: 'We have solved the issue: Priority donor reception protocols were verified at GGH, and your next-eligibility certificate has been synchronized with your profile.',
-      adminReplyStatus: 'RESOLVED',
-      adminRepliedAt: new Date(),
-      adminRepliedBy: 'Dr. Rajesh Varma',
-    },
-  });
-
-  // 8. Seed Audit Logs
-  console.log('Creating Audit Logs...');
-  await prisma.auditLog.createMany({
-    data: [
-      {
-        eventType: 'HOSPITAL_VERIFY',
-        description: 'Government General Hospital (GGH), Guntur license compliance verified by State Administrator.',
-        actorId: 'LD-ADM-001',
-        actorRole: 'ADMIN',
-        targetId: 'LD-HOSP-01',
-        targetType: 'HOSPITAL',
-        details: { note: 'License compliance verified by State Administrator.' },
-      },
-      {
-        eventType: 'REQUEST_CREATE',
-        description: 'Emergency blood request #LD1025 created for patient Ravi Teja by GGH Guntur.',
-        actorId: 'USER-HOSP-01',
-        actorRole: 'HOSPITAL',
-        targetId: 'LD1025',
-        targetType: 'BLOOD_REQUEST',
-        details: { patient: 'Ravi Teja' },
-      },
-    ],
-  });
 
   console.log('✅ Seeding completed successfully!');
 }

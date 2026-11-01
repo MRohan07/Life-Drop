@@ -41,8 +41,16 @@ export const useHome = (onEnterPlatform: (role?: string) => void) => {
     if (res.success) {
       onEnterPlatform(res.role || activeRole);
     } else {
-      setErrorMessage(res.message || 'Authentication failed. Please verify credentials.');
-      alert(res.message || 'Authentication failed. Please verify credentials.');
+      let displayMessage = res.message || 'Authentication failed. Please verify credentials.';
+      if (res.code === 'ACCOUNT_PENDING_ACTIVATION') {
+        displayMessage = 'Your account is awaiting activation. Please check your activation link or contact an administrator.';
+      } else if (res.code === 'FACILITY_PENDING_APPROVAL') {
+        displayMessage = 'Your facility registration is awaiting admin approval. You can track your application status using the Track Application button.';
+      } else if (res.code === 'ACCOUNT_SUSPENDED') {
+        displayMessage = 'Your account has been suspended by system administrator. Operational access is revoked.';
+      }
+      setErrorMessage(displayMessage);
+      alert(displayMessage);
     }
   };
 

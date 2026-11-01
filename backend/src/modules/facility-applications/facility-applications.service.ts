@@ -580,7 +580,20 @@ export class FacilityApplicationsService {
    * Admin approves application and generates secure activation invitation
    */
   async approveApplication(id: string, adminId: string, notes?: string) {
-    const application = await prisma.facilityApplication.findUnique({ where: { id } });
+    const application = await prisma.facilityApplication.findUnique({
+      where: { id },
+      include: {
+        createdUser: {
+          include: {
+            hospital: true,
+            bloodBank: true,
+            facilityApplication: true,
+          },
+        },
+        hospital: true,
+        bloodBank: true,
+      },
+    });
     if (!application) throw AppError.notFound('Facility application not found.');
 
     if (application.status === ApplicationStatus.APPROVED && application.isActivated) {
@@ -591,51 +604,175 @@ export class FacilityApplicationsService {
       throw AppError.badRequest('Cannot approve an application that has already been rejected.');
     }
 
-    // Generate high-entropy 64-character activation token for audit and backwards compatibility
+    const expectedRole =
+      application.facilityType === FacilityType.HOSPITAL ? UserRole.HOSPITAL : UserRole.BLOOD_BANK;
+
+    // Generate high-entropy 64-character activation token for audit and activation
     const activationToken = crypto.randomBytes(32).toString('hex');
     const activationTokenExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
     return await prisma.$transaction(async (tx) => {
-      let createdUser: any = null;
+      // 1. Check for conflicting user accounts with matching email, phone, or application.createdUserId
+      const conflictingUsers = await tx.user.findMany({
+        where: {
+          OR: [
+            { email: { equals: application.email, mode: 'insensitive' } },
+            { phone: application.phone },
+            ...(application.createdUserId ? [{ id: application.createdUserId }] : []),
+          ],
+        },
+        include: {
+          hospital: true,
+          bloodBank: true,
+          facilityApplication: true,
+        },
+      });
+
+      let linkedUser: any = null;
+
+      if (conflictingUsers.length > 1) {
+        throw AppError.conflict(
+          'Multiple conflicting user accounts match the application contact details.'
+        );
+      } else if (conflictingUsers.length === 1) {
+        const existing = conflictingUsers[0];
+
+        // Never attach an existing USER or ADMIN account to a facility application.
+        // Only link an existing user if its role matches the application's facility type.
+        if (existing.role !== expectedRole) {
+          throw AppError.conflict(
+            `A user account with this email or phone already exists with an incompatible role (${existing.role}). Direct attachment is prohibited.`
+          );
+        }
+
+        // Never demote or modify an unrelated ACTIVE account.
+        if (existing.status === UserStatus.ACTIVE && existing.id !== application.createdUserId) {
+          throw AppError.conflict(
+            'An active facility account already exists with these contact details. Conflicting match rejected.'
+          );
+        }
+
+        // Verify user is not linked to another application
+        if (existing.facilityApplication && existing.facilityApplication.id !== application.id) {
+          throw AppError.conflict(
+            'The matching user account is already linked to another facility application.'
+          );
+        }
+
+        // Verify facility profile ownership conflicts on the user
+        if (application.facilityType === FacilityType.HOSPITAL) {
+          if (existing.bloodBank) {
+            throw AppError.conflict('The matching user account already owns a blood bank profile.');
+          }
+          if (
+            existing.hospital &&
+            existing.hospital.facilityApplicationId &&
+            existing.hospital.facilityApplicationId !== application.id
+          ) {
+            throw AppError.conflict(
+              'The user hospital profile is already linked to another facility application.'
+            );
+          }
+        } else {
+          if (existing.hospital) {
+            throw AppError.conflict('The matching user account already owns a hospital profile.');
+          }
+          if (
+            existing.bloodBank &&
+            existing.bloodBank.facilityApplicationId &&
+            existing.bloodBank.facilityApplicationId !== application.id
+          ) {
+            throw AppError.conflict(
+              'The user blood bank profile is already linked to another facility application.'
+            );
+          }
+        }
+
+        // Re-link or update user to PENDING_ACTIVATION
+        linkedUser = await tx.user.update({
+          where: { id: existing.id },
+          data: {
+            status: UserStatus.PENDING_ACTIVATION,
+            name: application.name,
+            city: application.city,
+            location: application.address,
+            latitude: application.latitude || 16.3067,
+            longitude: application.longitude || 80.4365,
+            ...(application.passwordHash && !existing.passwordHash
+              ? { passwordHash: application.passwordHash }
+              : {}),
+          },
+        });
+      } else {
+        // Create new User account in PENDING_ACTIVATION
+        linkedUser = await tx.user.create({
+          data: {
+            name: application.name,
+            email: application.email,
+            phone: application.phone,
+            passwordHash: application.passwordHash,
+            role: expectedRole,
+            status: UserStatus.PENDING_ACTIVATION,
+            city: application.city,
+            location: application.address,
+            latitude: application.latitude || 16.3067,
+            longitude: application.longitude || 80.4365,
+            notificationPreferences: {
+              create: { inAppUrgent: true, inAppGeneral: true, smsEmergency: true, emailDigest: true },
+            },
+          },
+        });
+      }
+
+      // 2. Create or verify facility profile:
+      // Keep it PENDING_APPROVAL and isVerified: false until activation is successfully completed!
+      // Verify that any reused facility profile belongs to the same user and application. Reject ownership conflicts.
       let facilityRecord: any = null;
-      let isDirectlyActivated = false;
 
-      // If applicant provided a password during registration, activate their account immediately!
-      if (application.passwordHash && !application.createdUserId) {
-        const role = application.facilityType === 'HOSPITAL' ? UserRole.HOSPITAL : UserRole.BLOOD_BANK;
-
-        let user = await tx.user.findFirst({
-          where: { OR: [{ email: application.email }, { phone: application.phone }] },
+      if (application.facilityType === FacilityType.HOSPITAL) {
+        const existingHospital = await tx.hospital.findFirst({
+          where: {
+            OR: [
+              { userId: linkedUser.id },
+              { facilityApplicationId: application.id },
+              { licenseNumber: application.licenseNumber },
+            ],
+          },
         });
 
-        if (!user) {
-          user = await tx.user.create({
+        if (existingHospital) {
+          // Reject ownership conflicts
+          if (existingHospital.userId !== linkedUser.id) {
+            throw AppError.conflict(
+              'A hospital profile with this license or application belongs to a different user account.'
+            );
+          }
+          if (
+            existingHospital.facilityApplicationId &&
+            existingHospital.facilityApplicationId !== application.id
+          ) {
+            throw AppError.conflict(
+              'This hospital profile is already linked to a different facility application.'
+            );
+          }
+
+          facilityRecord = await tx.hospital.update({
+            where: { id: existingHospital.id },
             data: {
               name: application.name,
-              email: application.email,
-              phone: application.phone,
-              passwordHash: application.passwordHash,
-              role,
-              status: UserStatus.ACTIVE,
-              city: application.city,
-              location: application.address,
-              latitude: application.latitude || 16.3067,
-              longitude: application.longitude || 80.4365,
-              notificationPreferences: {
-                create: { inAppUrgent: true, inAppGeneral: true, smsEmergency: true, emailDigest: true },
-              },
+              facilityApplicationId: application.id,
+              isVerified: false,
+              status: VerificationStatus.PENDING_APPROVAL,
             },
           });
-        }
-        createdUser = user;
-
-        if (application.facilityType === 'HOSPITAL') {
+        } else {
           facilityRecord = await tx.hospital.create({
             data: {
-              userId: user.id,
+              userId: linkedUser.id,
               name: application.name,
               type: application.category || 'Private',
-              registrationNumber: application.registrationNumber || `HOSP-REG-${Date.now().toString().slice(-6)}`,
+              registrationNumber:
+                application.registrationNumber || `HOSP-REG-${Date.now().toString().slice(-6)}`,
               phone: application.phone,
               email: application.email,
               address: application.address,
@@ -655,15 +792,53 @@ export class FacilityApplicationsService {
               authorizedPersonPhone: application.authorizedPersonPhone,
               authorizedPersonEmail: application.authorizedPersonEmail,
               emergencyContact: application.emergencyContact,
-              isVerified: true,
-              status: VerificationStatus.VERIFIED,
+              isVerified: false,
+              status: VerificationStatus.PENDING_APPROVAL,
               facilityApplicationId: application.id,
+            },
+          });
+        }
+      } else {
+        // Blood Bank
+        const existingBB = await tx.bloodBank.findFirst({
+          where: {
+            OR: [
+              { userId: linkedUser.id },
+              { facilityApplicationId: application.id },
+              { licenseNumber: application.licenseNumber },
+            ],
+          },
+        });
+
+        if (existingBB) {
+          // Reject ownership conflicts
+          if (existingBB.userId !== linkedUser.id) {
+            throw AppError.conflict(
+              'A blood bank profile with this license or application belongs to a different user account.'
+            );
+          }
+          if (
+            existingBB.facilityApplicationId &&
+            existingBB.facilityApplicationId !== application.id
+          ) {
+            throw AppError.conflict(
+              'This blood bank profile is already linked to a different facility application.'
+            );
+          }
+
+          facilityRecord = await tx.bloodBank.update({
+            where: { id: existingBB.id },
+            data: {
+              name: application.name,
+              facilityApplicationId: application.id,
+              isVerified: false,
+              status: VerificationStatus.PENDING_APPROVAL,
             },
           });
         } else {
           facilityRecord = await tx.bloodBank.create({
             data: {
-              userId: user.id,
+              userId: linkedUser.id,
               name: application.name,
               type: application.category || 'Charitable',
               phone: application.phone,
@@ -674,36 +849,22 @@ export class FacilityApplicationsService {
               licenseNumber: application.licenseNumber,
               latitude: application.latitude || 16.3067,
               longitude: application.longitude || 80.4365,
-              componentsAvailable: application.componentsAvailable || ['Red Blood Cells', 'Platelets', 'Plasma', 'Whole Blood'],
+              componentsAvailable:
+                application.componentsAvailable || ['Red Blood Cells', 'Platelets', 'Plasma', 'Whole Blood'],
               authorizedPersonName: application.authorizedPersonName,
               authorizedPersonDesignation: application.authorizedPersonDesignation,
               authorizedPersonPhone: application.authorizedPersonPhone,
               authorizedPersonEmail: application.authorizedPersonEmail,
-              isVerified: true,
-              status: VerificationStatus.VERIFIED,
+              isVerified: false,
+              status: VerificationStatus.PENDING_APPROVAL,
               facilityApplicationId: application.id,
             },
           });
-
-          // Initialize 8 blood group inventory balances
-          const allGroups = Object.values(BloodGroup);
-          for (const group of allGroups) {
-            await tx.inventoryBalance.create({
-              data: {
-                bloodBankId: facilityRecord.id,
-                bloodGroup: group,
-                componentType: ComponentType.RED_BLOOD_CELLS,
-                availableUnits: 5,
-                reservedUnits: 0,
-                suppliedUnits: 0,
-              },
-            });
-          }
         }
-
-        isDirectlyActivated = true;
+        // Do not create any inventory during approval. Remove automatic inventory-balance creation and fabricated stock values.
       }
 
+      // 3. Update application to APPROVED with activation token
       const updated = await tx.facilityApplication.update({
         where: { id },
         data: {
@@ -712,19 +873,15 @@ export class FacilityApplicationsService {
           approvedByAdminId: adminId,
           activationToken,
           activationTokenExpiresAt,
-          ...(isDirectlyActivated
-            ? {
-                isActivated: true,
-                activatedAt: new Date(),
-                createdUserId: createdUser?.id,
-              }
-            : {}),
+          isActivated: false,
+          createdUserId: linkedUser.id,
         },
         include: {
           approvedByAdmin: { select: { id: true, name: true, email: true } },
         },
       });
 
+      // 4. Record review
       await tx.facilityApplicationReview.create({
         data: {
           applicationId: id,
@@ -736,10 +893,11 @@ export class FacilityApplicationsService {
         },
       });
 
+      // 5. Record AuditLog
       await tx.auditLog.create({
         data: {
           eventType: 'FACILITY_APPLICATION_APPROVED',
-          description: `Application ${application.referenceNumber} (${application.name}) approved by administrator.${isDirectlyActivated ? ' Account immediately activated.' : ''}`,
+          description: `Application ${application.referenceNumber} (${application.name}) approved by administrator. Account activation invitation generated.`,
           actorId: adminId,
           actorRole: 'ADMIN',
           targetId: id,
@@ -747,7 +905,6 @@ export class FacilityApplicationsService {
           details: {
             referenceNumber: application.referenceNumber,
             facilityType: application.facilityType,
-            isDirectlyActivated,
           },
         },
       });
@@ -755,12 +912,10 @@ export class FacilityApplicationsService {
       return {
         application: updated,
         activationToken,
-        user: createdUser,
-        hospital: application.facilityType === 'HOSPITAL' ? facilityRecord : undefined,
-        bloodBank: application.facilityType === 'BLOOD_BANK' ? facilityRecord : undefined,
-        message: isDirectlyActivated
-          ? 'Facility approved and fully activated. Facility can log in directly with their registered credentials.'
-          : 'Facility application approved. Activation token generated.',
+        user: linkedUser,
+        hospital: application.facilityType === FacilityType.HOSPITAL ? facilityRecord : undefined,
+        bloodBank: application.facilityType === FacilityType.BLOOD_BANK ? facilityRecord : undefined,
+        message: 'Facility application approved. Activation token generated.',
       };
     });
   }
@@ -769,12 +924,20 @@ export class FacilityApplicationsService {
    * Verify activation token validity for the applicant activation portal
    */
   async verifyActivationToken(token: string) {
+    if (!token) {
+      throw AppError.badRequest('Activation token is required.');
+    }
+
     const application = await prisma.facilityApplication.findUnique({
       where: { activationToken: token },
     });
 
     if (!application) {
       throw AppError.badRequest('Invalid, expired, or previously redeemed activation token.');
+    }
+
+    if (application.status !== ApplicationStatus.APPROVED) {
+      throw AppError.badRequest('Facility application has not been approved.');
     }
 
     if (application.isActivated) {
@@ -801,15 +964,28 @@ export class FacilityApplicationsService {
 
   /**
    * Applicant completes activation by setting their secure password.
-   * Atomically creates the User and Hospital/BloodBank records in PostgreSQL!
+   * Atomically activates the User and verifies the facility profile in PostgreSQL!
    */
-  async completeActivation(token: string, password: string) {
+  async completeActivation(token: string, password?: string) {
+    if (!token) {
+      throw AppError.badRequest('Activation token is required.');
+    }
+
     const application = await prisma.facilityApplication.findUnique({
       where: { activationToken: token },
+      include: {
+        createdUser: true,
+        hospital: true,
+        bloodBank: true,
+      },
     });
 
     if (!application) {
       throw AppError.badRequest('Invalid or expired activation token.');
+    }
+
+    if (application.status !== ApplicationStatus.APPROVED) {
+      throw AppError.badRequest('Facility application has not been approved.');
     }
 
     if (application.isActivated) {
@@ -820,136 +996,104 @@ export class FacilityApplicationsService {
       throw AppError.badRequest('Activation token has expired.');
     }
 
-    // Verify no account collision
-    const existingUser = await prisma.user.findFirst({
-      where: {
-        OR: [{ email: application.email }, { phone: application.phone }],
-      },
-    });
-    if (existingUser) {
-      throw AppError.conflict('An active user account with this email or phone already exists.');
+    if (!application.createdUserId || !application.createdUser) {
+      throw AppError.badRequest('No linked user account found for this application.');
     }
 
-    const passwordHash = await hashPassword(password);
-    const role = application.facilityType === 'HOSPITAL' ? UserRole.HOSPITAL : UserRole.BLOOD_BANK;
+    const expectedRole =
+      application.facilityType === FacilityType.HOSPITAL ? UserRole.HOSPITAL : UserRole.BLOOD_BANK;
+
+    // Verify linked user role matches expected facility type
+    if (application.createdUser.role !== expectedRole) {
+      throw AppError.conflict(
+        `Linked user account role (${application.createdUser.role}) does not match expected facility role (${expectedRole}).`
+      );
+    }
+
+    // Verify user is linked to this exact application and facility profile
+    let facilityRecord: any = null;
+    if (application.facilityType === FacilityType.HOSPITAL) {
+      const hospital =
+        application.hospital ||
+        (await prisma.hospital.findFirst({
+          where: { facilityApplicationId: application.id },
+        }));
+
+      if (!hospital) {
+        throw AppError.notFound('Linked hospital profile not found for this application.');
+      }
+      if (hospital.userId !== application.createdUserId) {
+        throw AppError.conflict('Hospital profile ownership conflict: profile is not owned by the linked user.');
+      }
+      if (hospital.facilityApplicationId !== application.id) {
+        throw AppError.conflict('Hospital profile is not linked to this application.');
+      }
+      facilityRecord = hospital;
+    } else {
+      const bloodBank =
+        application.bloodBank ||
+        (await prisma.bloodBank.findFirst({
+          where: { facilityApplicationId: application.id },
+        }));
+
+      if (!bloodBank) {
+        throw AppError.notFound('Linked blood bank profile not found for this application.');
+      }
+      if (bloodBank.userId !== application.createdUserId) {
+        throw AppError.conflict('Blood bank profile ownership conflict: profile is not owned by the linked user.');
+      }
+      if (bloodBank.facilityApplicationId !== application.id) {
+        throw AppError.conflict('Blood bank profile is not linked to this application.');
+      }
+      facilityRecord = bloodBank;
+    }
+
+    const newPasswordHash = password
+      ? await hashPassword(password)
+      : application.createdUser.passwordHash || application.passwordHash;
+
+    if (!newPasswordHash) {
+      throw AppError.badRequest('Password is required to complete activation.');
+    }
 
     return await prisma.$transaction(async (tx) => {
-      // 1. Create the persistent User record
-      const user = await tx.user.create({
+      // 1. Activate the correct user (NEVER an unrelated account through email/phone match)
+      const user = await tx.user.update({
+        where: { id: application.createdUserId! },
         data: {
-          name: application.name,
-          email: application.email,
-          phone: application.phone,
-          passwordHash,
-          role,
           status: UserStatus.ACTIVE,
-          city: application.city,
-          location: application.address,
-          latitude: application.latitude || 16.3067,
-          longitude: application.longitude || 80.4365,
-          notificationPreferences: {
-            create: {
-              inAppUrgent: true,
-              inAppGeneral: true,
-              smsEmergency: true,
-              emailDigest: true,
-            },
-          },
+          passwordHash: newPasswordHash,
         },
       });
 
-      let facilityRecord: any;
-
-      // 2. Create the authorized Hospital or BloodBank record
-      if (application.facilityType === 'HOSPITAL') {
-        facilityRecord = await tx.hospital.create({
+      // 2. Verify the facility profile (Preserve existing profile data and inventory; do NOT create duplicate profiles or stock)
+      let verifiedFacility: any = null;
+      if (application.facilityType === FacilityType.HOSPITAL) {
+        verifiedFacility = await tx.hospital.update({
+          where: { id: facilityRecord.id },
           data: {
-            userId: user.id,
-            name: application.name,
-            type: application.category || 'Private',
-            registrationNumber: application.registrationNumber || `HOSP-REG-${Date.now().toString().slice(-6)}`,
-            phone: application.phone,
-            email: application.email,
-            address: application.address,
-            area: application.area || application.city,
-            city: application.city,
-            state: application.state || 'Andhra Pradesh',
-            pinCode: application.pinCode || '522001',
-            latitude: application.latitude || 16.3067,
-            longitude: application.longitude || 80.4365,
-            services: application.services || ['Emergency Transfusion & Critical Care'],
-            licenseNumber: application.licenseNumber,
-            issuingAuthority: application.issuingAuthority,
-            licenseDocUrl: application.licenseDocUrl,
-            registrationCertUrl: application.registrationCertUrl,
-            authorizedPersonName: application.authorizedPersonName,
-            authorizedPersonDesignation: application.authorizedPersonDesignation,
-            authorizedPersonPhone: application.authorizedPersonPhone,
-            authorizedPersonEmail: application.authorizedPersonEmail,
-            emergencyContact: application.emergencyContact,
             isVerified: true,
             status: VerificationStatus.VERIFIED,
-            facilityApplicationId: application.id,
           },
         });
       } else {
-        facilityRecord = await tx.bloodBank.create({
+        verifiedFacility = await tx.bloodBank.update({
+          where: { id: facilityRecord.id },
           data: {
-            userId: user.id,
-            name: application.name,
-            type: application.category || 'Private',
-            registrationNumber: application.registrationNumber || `BB-REG-${Date.now().toString().slice(-6)}`,
-            phone: application.phone,
-            email: application.email,
-            address: application.address,
-            area: application.area || application.city,
-            city: application.city,
-            state: application.state || 'Andhra Pradesh',
-            pinCode: application.pinCode || '522001',
-            latitude: application.latitude || 16.3067,
-            longitude: application.longitude || 80.4365,
-            componentsAvailable:
-              application.componentsAvailable && application.componentsAvailable.length > 0
-                ? application.componentsAvailable
-                : ['Red Blood Cells', 'Platelets', 'Plasma', 'Whole Blood'],
-            licenseNumber: application.licenseNumber,
-            issuingAuthority: application.issuingAuthority,
-            licenseDocUrl: application.licenseDocUrl,
-            registrationCertUrl: application.registrationCertUrl,
-            authorizedPersonName: application.authorizedPersonName,
-            authorizedPersonDesignation: application.authorizedPersonDesignation,
-            authorizedPersonPhone: application.authorizedPersonPhone,
-            authorizedPersonEmail: application.authorizedPersonEmail,
             isVerified: true,
             status: VerificationStatus.VERIFIED,
-            facilityApplicationId: application.id,
           },
         });
-
-        // Initialize blood balances for all 8 groups
-        const allGroups = Object.values(BloodGroup);
-        for (const group of allGroups) {
-          await tx.inventoryBalance.create({
-            data: {
-              bloodBankId: facilityRecord.id,
-              bloodGroup: group,
-              componentType: ComponentType.RED_BLOOD_CELLS,
-              availableUnits: 10,
-              reservedUnits: 0,
-              suppliedUnits: 0,
-            },
-          });
-        }
       }
 
-      // 3. Mark application as activated and link to created user
+      // 3. Mark application activated, set activatedAt, and clear activation token and expiry
       await tx.facilityApplication.update({
         where: { id: application.id },
         data: {
           isActivated: true,
           activatedAt: new Date(),
-          createdUserId: user.id,
-          activationToken: null, // Clear used token
+          activationToken: null,
+          activationTokenExpiresAt: null,
         },
       });
 
@@ -959,10 +1103,10 @@ export class FacilityApplicationsService {
           eventType: 'FACILITY_ACCOUNT_ACTIVATED',
           description: `Facility account activated for ${application.name} (${application.facilityType}). User ID: ${user.id}`,
           actorId: user.id,
-          actorRole: role,
-          targetId: facilityRecord.id,
+          actorRole: expectedRole,
+          targetId: verifiedFacility.id,
           targetType: application.facilityType,
-          details: { referenceNumber: application.referenceNumber, facilityId: facilityRecord.id },
+          details: { referenceNumber: application.referenceNumber, facilityId: verifiedFacility.id },
         },
       });
 
@@ -994,9 +1138,9 @@ export class FacilityApplicationsService {
           phone: user.phone,
           role: user.role,
           city: user.city,
-          facilityId: facilityRecord.id,
+          facilityId: verifiedFacility.id,
         },
-        facility: facilityRecord,
+        facility: verifiedFacility,
         accessToken,
         refreshToken,
       };

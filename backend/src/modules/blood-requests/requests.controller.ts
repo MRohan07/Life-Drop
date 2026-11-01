@@ -137,7 +137,8 @@ export class RequestsController {
         req.params.id,
         req.user.id,
         req.user.role,
-        reason
+        reason,
+        req.user.hospitalId
       );
       res.status(200).json({ status: 'success', message: 'Requisition cancelled', data: { request: result } });
     } catch (err) {
@@ -148,7 +149,11 @@ export class RequestsController {
   async fulfillRequest(req: Request, res: Response, next: NextFunction) {
     try {
       if (!req.user) throw AppError.unauthorized();
-      const result = await requestsService.fulfillRequest(req.params.id);
+      const result = await requestsService.fulfillRequest(
+        req.params.id,
+        req.user.role,
+        req.user.hospitalId
+      );
       res.status(200).json({ status: 'success', message: 'Requisition marked 100% fulfilled', data: { request: result } });
     } catch (err) {
       next(err);

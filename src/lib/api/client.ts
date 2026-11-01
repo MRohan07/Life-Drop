@@ -137,7 +137,11 @@ class ApiClient {
                 .map((e: any) => `${e.field ? `${e.field}: ` : ''}${e.message}`)
                 .join(', ')
             : null;
-        throw new Error(errorDetails || json.message || `API error ${response.status}`);
+        const apiError: any = new Error(errorDetails || json.message || `API error ${response.status}`);
+        apiError.status = response.status;
+        apiError.code = json.code;
+        apiError.data = json;
+        throw apiError;
       }
 
       return json.data !== undefined ? json.data : json;

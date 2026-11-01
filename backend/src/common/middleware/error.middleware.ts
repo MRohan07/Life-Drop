@@ -15,12 +15,18 @@ export function errorHandler(
     if (err.statusCode >= 500) {
       logger.error({ err, path: req.path }, err.message);
     }
-    return res.status(err.statusCode).json({
+    const responsePayload: any = {
       status: 'error',
       statusCode: err.statusCode,
       message: err.message,
-      errors: err.errors,
-    });
+    };
+    if (err.code) {
+      responsePayload.code = err.code;
+    }
+    if (err.errors !== undefined) {
+      responsePayload.errors = err.errors;
+    }
+    return res.status(err.statusCode).json(responsePayload);
   }
 
   // Prisma Known Request Errors

@@ -58,7 +58,7 @@ interface LifeDropContextType {
 
   // Real PostgreSQL Auth
   isAuthenticated: boolean;
-  login: (identifier: string, password?: string, role?: UserRole) => Promise<{ success: boolean; message?: string; role?: UserRole }>;
+  login: (identifier: string, password?: string, role?: UserRole) => Promise<{ success: boolean; message?: string; role?: UserRole; code?: string }>;
   loginWithDemo: (role: UserRole, accountKey?: string) => Promise<{ success: boolean; message?: string; role?: UserRole }>;
   logout: () => Promise<void>;
   checkAuthSession: () => Promise<boolean>;
@@ -607,7 +607,7 @@ export const LifeDropProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     identifier: string,
     password?: string,
     role?: UserRole
-  ): Promise<{ success: boolean; message?: string; role?: UserRole }> => {
+  ): Promise<{ success: boolean; message?: string; role?: UserRole; code?: string }> => {
     try {
       const res = await api.auth.login(identifier, password, role);
       if (res?.accessToken) {
@@ -657,7 +657,7 @@ export const LifeDropProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return { success: false, message: 'Invalid response from server' };
     } catch (err: any) {
       console.error('Login error:', err);
-      return { success: false, message: err.message || 'Login failed' };
+      return { success: false, message: err.message || 'Login failed', code: err.code };
     }
   };
 

@@ -57,7 +57,29 @@ export async function authenticateUser(req: Request, res: Response, next: NextFu
     }
 
     if (user.status === UserStatus.SUSPENDED) {
-      throw AppError.forbidden('Your account has been suspended by system administrator');
+      throw AppError.forbidden('Your account has been suspended.', 'ACCOUNT_SUSPENDED');
+    }
+
+    if (user.status === UserStatus.PENDING_ACTIVATION) {
+      throw AppError.forbidden('Your account is awaiting activation.', 'ACCOUNT_PENDING_ACTIVATION');
+    }
+
+    if (user.hospital) {
+      if (user.hospital.status === 'SUSPENDED') {
+        throw AppError.forbidden('Your account has been suspended.', 'ACCOUNT_SUSPENDED');
+      }
+      if (user.hospital.status === 'REJECTED') {
+        throw AppError.forbidden('Your facility application was rejected.', 'FACILITY_REJECTED');
+      }
+    }
+
+    if (user.bloodBank) {
+      if (user.bloodBank.status === 'SUSPENDED') {
+        throw AppError.forbidden('Your account has been suspended.', 'ACCOUNT_SUSPENDED');
+      }
+      if (user.bloodBank.status === 'REJECTED') {
+        throw AppError.forbidden('Your facility application was rejected.', 'FACILITY_REJECTED');
+      }
     }
 
     req.user = {
@@ -110,7 +132,8 @@ export function requireVerifiedFacility(req: Request, res: Response, next: NextF
     if (!req.user.hospitalVerified) {
       return next(
         AppError.forbidden(
-          'Operational facility access is restricted. Your hospital account is pending administrator approval or has been suspended.'
+          'Your facility registration is awaiting admin approval.',
+          'FACILITY_PENDING_APPROVAL'
         )
       );
     }
@@ -120,7 +143,8 @@ export function requireVerifiedFacility(req: Request, res: Response, next: NextF
     if (!req.user.bloodBankVerified) {
       return next(
         AppError.forbidden(
-          'Operational facility access is restricted. Your blood bank account is pending administrator approval or has been suspended.'
+          'Your facility registration is awaiting admin approval.',
+          'FACILITY_PENDING_APPROVAL'
         )
       );
     }
