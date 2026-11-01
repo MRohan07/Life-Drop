@@ -12,6 +12,7 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:seed": "tsx prisma/seed.ts",
+    "prisma:restore-admin": "tsx prisma/restore-admin.ts",
     "prisma:reset": "prisma migrate reset --force",
     "test": "vitest run --fileParallelism=false",
     "test:watch": "vitest",
