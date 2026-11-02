@@ -15,8 +15,13 @@ export class AdminController {
 
   async listUsers(req: Request, res: Response, next: NextFunction) {
     try {
-      const role = req.query.role ? String(req.query.role) : undefined;
-      const users = await adminService.listUsers(role);
+      const { role, status, search, limit } = req.query;
+      const users = await adminService.listUsers({
+        role: role ? String(role) : undefined,
+        status: status ? String(status) : undefined,
+        search: search ? String(search) : undefined,
+        limit: limit ? Number(limit) : undefined,
+      });
       res.status(200).json({ status: 'success', results: users.length, data: { users } });
     } catch (err) {
       next(err);
@@ -40,7 +45,11 @@ export class AdminController {
 
   async listHospitals(req: Request, res: Response, next: NextFunction) {
     try {
-      const hospitals = await adminService.listHospitals();
+      const { status, search } = req.query;
+      const hospitals = await adminService.listHospitals({
+        status: status ? String(status) : undefined,
+        search: search ? String(search) : undefined,
+      });
       res.status(200).json({ status: 'success', results: hospitals.length, data: { hospitals } });
     } catch (err) {
       next(err);
@@ -64,7 +73,11 @@ export class AdminController {
 
   async listBloodBanks(req: Request, res: Response, next: NextFunction) {
     try {
-      const bloodBanks = await adminService.listBloodBanks();
+      const { status, search } = req.query;
+      const bloodBanks = await adminService.listBloodBanks({
+        status: status ? String(status) : undefined,
+        search: search ? String(search) : undefined,
+      });
       res.status(200).json({ status: 'success', results: bloodBanks.length, data: { bloodBanks } });
     } catch (err) {
       next(err);

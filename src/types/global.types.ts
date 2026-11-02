@@ -57,6 +57,7 @@ export interface UserProfile {
   status: 'ACTIVE' | 'WARNED' | 'SUSPENDED';
   warningCount: number;
   avatarUrl?: string;
+  role?: UserRole;
 }
 
 export interface AdminProfile {

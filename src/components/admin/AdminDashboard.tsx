@@ -71,16 +71,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     deleteBloodRequest,
     facilityApplications = [],
     fetchFacilityApplications,
+    refreshAdminData,
   } = useLifeDrop();
 
   const [deleteReqConfirmId, setDeleteReqConfirmId] = useState<string | null>(null);
   const [isDeletingReq, setIsDeletingReq] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Active view driven directly by parent subTab prop (single source of truth)
   const activeTab = subTab;
 
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await refreshAdminData?.();
+      await fetchFacilityApplications?.();
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   useEffect(() => {
     fetchFacilityApplications?.();
+    refreshAdminData?.();
   }, [activeTab]);
 
   // Search & Filter state for sections
@@ -381,6 +394,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       {totalPendingFacilityApps}
                     </span>
                   )}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRefresh}
+                  disabled={isRefreshing}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl bg-white/10 hover:bg-white/20 border border-white/20 text-white text-xs font-extrabold transition-all cursor-pointer shadow-xs active:scale-95 disabled:opacity-50"
+                  title="Sync live facilities, accounts, and applications from database"
+                >
+                  <RotateCcw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-purple-300' : 'text-slate-300'}`} />
+                  <span>{isRefreshing ? 'Syncing...' : 'Refresh Data'}</span>
                 </button>
                 <button
                   type="button"
@@ -740,6 +763,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
 
             <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleRefresh}
+                disabled={isRefreshing}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all cursor-pointer shadow-xs active:scale-95 disabled:opacity-50"
+              >
+                <RotateCcw className={`w-3 h-3 ${isRefreshing ? 'animate-spin text-blue-600' : 'text-slate-500'}`} />
+                <span>{isRefreshing ? 'Syncing...' : 'Refresh'}</span>
+              </button>
               <span className="text-xs px-3 py-1.5 rounded-xl bg-slate-100 text-slate-700 font-bold">
                 {verifiedHospitals.length} Verified
               </span>
@@ -1158,6 +1190,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
 
             <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleRefresh}
+                disabled={isRefreshing}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all cursor-pointer shadow-xs active:scale-95 disabled:opacity-50"
+              >
+                <RotateCcw className={`w-3 h-3 ${isRefreshing ? 'animate-spin text-blue-600' : 'text-slate-500'}`} />
+                <span>{isRefreshing ? 'Syncing...' : 'Refresh'}</span>
+              </button>
               <span className="text-xs px-3 py-1.5 rounded-xl bg-slate-100 text-slate-700 font-bold">
                 {verifiedBloodBanks.length} Certified
               </span>
@@ -1583,8 +1624,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </p>
             </div>
 
-            <div className="text-xs font-bold px-3 py-1.5 rounded-xl bg-slate-100 text-slate-700">
-              {users.length} Registered Accounts
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleRefresh}
+                disabled={isRefreshing}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all cursor-pointer shadow-xs active:scale-95 disabled:opacity-50"
+              >
+                <RotateCcw className={`w-3 h-3 ${isRefreshing ? 'animate-spin text-purple-600' : 'text-slate-500'}`} />
+                <span>{isRefreshing ? 'Syncing...' : 'Refresh'}</span>
+              </button>
+              <div className="text-xs font-bold px-3 py-1.5 rounded-xl bg-slate-100 text-slate-700">
+                {users.length} Registered Accounts
+              </div>
             </div>
           </div>
 
@@ -1643,7 +1695,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                  {filteredUsers.map((user) => (
+                  {filteredUsers.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="p-12 text-center text-slate-400">
+                        <div className="flex flex-col items-center justify-center space-y-2">
+                          <Users className="w-8 h-8 text-slate-300 mx-auto" />
+                          <p className="font-bold text-slate-700">No user accounts found matching your filters.</p>
+                          <p className="text-[11px] text-slate-400">Try adjusting your search term, blood group, or status filter.</p>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredUsers.map((user) => (
                     <tr key={user.id} className="hover:bg-slate-50/80 transition-colors">
                       <td className="p-4">
                         <div className="font-extrabold text-slate-900">{user.name}</div>
@@ -1702,7 +1765,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </button>
                       </td>
                     </tr>
-                  ))}
+                  )))}
                 </tbody>
               </table>
             </div>

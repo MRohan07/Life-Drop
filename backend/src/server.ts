@@ -3,6 +3,7 @@ import { ENV } from './config/env.js';
 import { logger } from './common/logging/logger.js';
 import { prisma } from './config/database.js';
 import { facilityApplicationsService } from './modules/facility-applications/facility-applications.service.js';
+import { seedDemoAccountsIfMissing } from './modules/seed/seed-demo-accounts.js';
 
 const PORT = Number(process.env.PORT) || ENV.PORT || 5001;
 const HOST = '0.0.0.0';
@@ -21,6 +22,13 @@ const server = app.listen(PORT, HOST, async () => {
       }
     } catch (reconcileErr) {
       logger.warn({ err: reconcileErr }, 'Startup reconciliation of approved facilities completed with warnings.');
+    }
+
+    try {
+      await seedDemoAccountsIfMissing(prisma);
+      logger.info('Demo accounts and approved facilities verified.');
+    } catch (seedErr) {
+      logger.warn({ err: seedErr }, 'Demo accounts verification completed with warnings.');
     }
   } catch (err) {
     logger.error({ err }, 'Failed to connect to PostgreSQL database on startup');

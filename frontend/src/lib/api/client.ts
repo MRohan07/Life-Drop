@@ -375,20 +375,42 @@ class ApiClient {
 
   admin = {
     getDashboard: () => this.request('/admin/dashboard'),
-    listUsers: (role?: string) =>
-      this.request(`/admin/users${role ? `?role=${role}` : ''}`),
+    listUsers: (params?: string | { role?: string; status?: string; search?: string; limit?: number }) => {
+      if (typeof params === 'string') {
+        return this.request(`/admin/users?role=${encodeURIComponent(params)}`);
+      }
+      const query = new URLSearchParams();
+      if (params?.role) query.set('role', params.role);
+      if (params?.status) query.set('status', params.status);
+      if (params?.search) query.set('search', params.search);
+      if (params?.limit) query.set('limit', String(params.limit));
+      const qs = query.toString();
+      return this.request(`/admin/users${qs ? `?${qs}` : ''}`);
+    },
     updateUserStatus: (id: string, status: string, reason?: string) =>
       this.request(`/admin/users/${id}/status`, {
         method: 'PATCH',
         body: JSON.stringify({ status, reason }),
       }),
-    listHospitals: () => this.request('/admin/hospitals'),
+    listHospitals: (params?: { status?: string; search?: string }) => {
+      const query = new URLSearchParams();
+      if (params?.status) query.set('status', params.status);
+      if (params?.search) query.set('search', params.search);
+      const qs = query.toString();
+      return this.request(`/admin/hospitals${qs ? `?${qs}` : ''}`);
+    },
     updateHospitalVerification: (id: string, status: string, reason?: string) =>
       this.request(`/admin/hospitals/${id}/verification`, {
         method: 'PATCH',
         body: JSON.stringify({ status, reason }),
       }),
-    listBloodBanks: () => this.request('/admin/blood-banks'),
+    listBloodBanks: (params?: { status?: string; search?: string }) => {
+      const query = new URLSearchParams();
+      if (params?.status) query.set('status', params.status);
+      if (params?.search) query.set('search', params.search);
+      const qs = query.toString();
+      return this.request(`/admin/blood-banks${qs ? `?${qs}` : ''}`);
+    },
     updateBloodBankVerification: (id: string, status: string, reason?: string) =>
       this.request(`/admin/blood-banks/${id}/verification`, {
         method: 'PATCH',

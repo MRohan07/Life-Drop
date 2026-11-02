@@ -38,16 +38,39 @@ export class AdminService {
     };
   }
 
-  async listUsers(role?: string) {
+  async listUsers(filters?: { role?: string; status?: string; search?: string; limit?: number }) {
+    const where: any = {};
+    if (filters?.role) {
+      where.role = filters.role;
+    }
+    if (filters?.status) {
+      where.status = filters.status;
+    }
+    if (filters?.search) {
+      const q = filters.search.trim();
+      where.OR = [
+        { name: { contains: q, mode: 'insensitive' } },
+        { email: { contains: q, mode: 'insensitive' } },
+        { phone: { contains: q } },
+        { id: { contains: q, mode: 'insensitive' } },
+        { city: { contains: q, mode: 'insensitive' } },
+      ];
+    }
+
     return await prisma.user.findMany({
-      where: role ? { role: role as any } : undefined,
+      where,
       include: {
-        donorProfile: true,
-        hospital: { select: { id: true, name: true, status: true } },
-        bloodBank: { select: { id: true, name: true, status: true } },
+        donorProfile: {
+          include: {
+            availability: true,
+            consent: true,
+          },
+        },
+        hospital: { select: { id: true, name: true, status: true, isVerified: true } },
+        bloodBank: { select: { id: true, name: true, status: true, isVerified: true } },
       },
       orderBy: { createdAt: 'desc' },
-      take: 100,
+      take: filters?.limit ? Number(filters.limit) : 500,
     });
   }
 
@@ -86,10 +109,34 @@ export class AdminService {
     });
   }
 
-  async listHospitals() {
+  async listHospitals(filters?: { status?: string; search?: string }) {
+    const where: any = {};
+    if (filters?.status) {
+      if (filters.status === 'VERIFIED') {
+        where.isVerified = true;
+      } else if (filters.status === 'PENDING') {
+        where.status = VerificationStatus.PENDING_APPROVAL;
+      } else {
+        where.status = filters.status;
+      }
+    }
+    if (filters?.search) {
+      const q = filters.search.trim();
+      where.OR = [
+        { name: { contains: q, mode: 'insensitive' } },
+        { city: { contains: q, mode: 'insensitive' } },
+        { licenseNumber: { contains: q, mode: 'insensitive' } },
+        { registrationNumber: { contains: q, mode: 'insensitive' } },
+        { email: { contains: q, mode: 'insensitive' } },
+        { phone: { contains: q } },
+      ];
+    }
+
     return await prisma.hospital.findMany({
+      where,
       include: {
-        user: { select: { id: true, name: true, phone: true, email: true } },
+        user: { select: { id: true, name: true, phone: true, email: true, status: true } },
+        facilityApplication: true,
       },
       orderBy: { submittedDate: 'desc' },
     });
@@ -126,11 +173,35 @@ export class AdminService {
     });
   }
 
-  async listBloodBanks() {
+  async listBloodBanks(filters?: { status?: string; search?: string }) {
+    const where: any = {};
+    if (filters?.status) {
+      if (filters.status === 'VERIFIED') {
+        where.isVerified = true;
+      } else if (filters.status === 'PENDING') {
+        where.status = VerificationStatus.PENDING_APPROVAL;
+      } else {
+        where.status = filters.status;
+      }
+    }
+    if (filters?.search) {
+      const q = filters.search.trim();
+      where.OR = [
+        { name: { contains: q, mode: 'insensitive' } },
+        { city: { contains: q, mode: 'insensitive' } },
+        { licenseNumber: { contains: q, mode: 'insensitive' } },
+        { registrationNumber: { contains: q, mode: 'insensitive' } },
+        { email: { contains: q, mode: 'insensitive' } },
+        { phone: { contains: q } },
+      ];
+    }
+
     return await prisma.bloodBank.findMany({
+      where,
       include: {
         inventoryBalances: true,
-        user: { select: { id: true, name: true, phone: true, email: true } },
+        user: { select: { id: true, name: true, phone: true, email: true, status: true } },
+        facilityApplication: true,
       },
       orderBy: { submittedDate: 'desc' },
     });

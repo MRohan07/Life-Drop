@@ -42,6 +42,7 @@ import {
   transformBackendBloodBank,
   transformBackendDonor,
   transformBackendCampaign,
+  transformBackendUser,
 } from '../lib/api/transformers';
 
 interface LifeDropContextType {
@@ -237,6 +238,7 @@ interface LifeDropContextType {
   facilityApplications: any[];
   fetchFacilityApplications: () => Promise<void>;
   pendingApplicationsCount: number;
+  refreshAdminData: () => Promise<void>;
 
   // Real-time Push Notification
   pushNotification: (
@@ -441,6 +443,47 @@ export const LifeDropProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     (a) => a.status === 'PENDING' || a.status === 'UNDER_REVIEW'
   ).length;
 
+  const refreshAdminData = useCallback(async (): Promise<void> => {
+    try {
+      const [usersRes, hospRes, bbRes, appsRes] = await Promise.allSettled([
+        api.admin.listUsers(),
+        api.admin.listHospitals(),
+        api.admin.listBloodBanks(),
+        api.facilityApplications.list({ limit: 100 }),
+      ]);
+
+      if (usersRes.status === 'fulfilled') {
+        const uList = (usersRes.value as any)?.users || (usersRes.value as any)?.data?.users || (Array.isArray(usersRes.value) ? usersRes.value : []);
+        if (Array.isArray(uList) && uList.length > 0) {
+          const transformed = uList.map(transformBackendUser);
+          setUsers(transformed);
+        }
+      }
+      if (hospRes.status === 'fulfilled') {
+        const hList = (hospRes.value as any)?.hospitals || (hospRes.value as any)?.data?.hospitals || (Array.isArray(hospRes.value) ? hospRes.value : []);
+        if (Array.isArray(hList) && hList.length > 0) {
+          const transformed = hList.map(transformBackendHospital);
+          setHospitals(transformed);
+        }
+      }
+      if (bbRes.status === 'fulfilled') {
+        const bList = (bbRes.value as any)?.bloodBanks || (bbRes.value as any)?.data?.bloodBanks || (Array.isArray(bbRes.value) ? bbRes.value : []);
+        if (Array.isArray(bList) && bList.length > 0) {
+          const transformed = bList.map(transformBackendBloodBank);
+          setBloodBanks(transformed);
+        }
+      }
+      if (appsRes.status === 'fulfilled') {
+        const apps = (appsRes.value as any)?.applications || (appsRes.value as any)?.data?.applications || (Array.isArray(appsRes.value) ? appsRes.value : []);
+        if (Array.isArray(apps)) {
+          setFacilityApplications(apps);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to refresh admin data from backend', err);
+    }
+  }, []);
+
   const checkAuthSession = async (): Promise<boolean> => {
     try {
       const stored = typeof window !== 'undefined' ? localStorage.getItem('lifedrop_auth_user') : null;
@@ -466,6 +509,7 @@ export const LifeDropProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           }
         } else if (user.role === 'ADMIN') {
           fetchFacilityApplications();
+          refreshAdminData().catch(() => {});
           if (user.adminProfile) {
             setAdmin((prev) => ({
               ...prev,
@@ -634,6 +678,7 @@ export const LifeDropProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           }
         } else if (user.role === 'ADMIN') {
           fetchFacilityApplications();
+          refreshAdminData().catch(() => {});
           if (user.adminProfile) {
             setAdmin((prev) => ({
               ...prev,
@@ -813,6 +858,11 @@ export const LifeDropProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           if (Array.isArray(apps) && apps.length > 0) {
             setFacilityApplications(apps);
           }
+        }
+
+        const storedAuth = typeof window !== 'undefined' ? localStorage.getItem('lifedrop_auth_user') : null;
+        if (storedAuth && storedAuth.includes('"ADMIN"')) {
+          refreshAdminData().catch(() => {});
         }
       } catch (err) {
         console.warn('Backend sync failed, falling back to local persistent store', err);
@@ -2870,6 +2920,7 @@ export const LifeDropProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         facilityApplications,
         fetchFacilityApplications,
         pendingApplicationsCount,
+        refreshAdminData,
         pushNotification,
       }}
     >

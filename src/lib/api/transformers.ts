@@ -157,26 +157,57 @@ export function transformBackendHospital(h: any): Hospital {
 }
 
 export function transformBackendDonor(d: any): UserProfile {
+  const user = d.user || d;
+  const bg = normalizeBloodGroup(d.bloodGroup || user.bloodGroup || 'O_POS') as BloodGroup;
   return {
-    id: d.id,
-    name: d.name,
-    phone: d.phone,
-    email: d.email || `${d.id.toLowerCase()}@lifedrop.io`,
-    dob: d.dob ? new Date(d.dob).toISOString().slice(0, 10) : '1998-01-01',
-    bloodGroup: normalizeBloodGroup(d.bloodGroup) as BloodGroup,
-    city: d.city || 'Guntur',
-    location: d.location || 'Guntur',
-    latitude: d.latitude ?? 16.3067,
-    longitude: d.longitude ?? 80.4365,
+    id: user.id || d.id,
+    name: user.name || d.name || 'Donor',
+    phone: user.phone || d.phone || '',
+    email: user.email || d.email || `${(user.id || d.id).toLowerCase()}@lifedrop.io`,
+    dob: user.dob ? new Date(user.dob).toISOString().slice(0, 10) : '1998-01-01',
+    bloodGroup: bg,
+    city: user.city || d.city || 'Guntur',
+    location: user.location || d.location || 'Guntur',
+    latitude: user.latitude ?? d.latitude ?? 16.3067,
+    longitude: user.longitude ?? d.longitude ?? 80.4365,
     lastDonationDate: d.lastDonationDate ? new Date(d.lastDonationDate).toISOString().slice(0, 10) : null,
     nextEligibleDate: d.nextEligibleDate ? new Date(d.nextEligibleDate).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
     isEligible: d.isEligible ?? true,
     totalDonations: d.totalDonations ?? 0,
     rank: d.rank || 'Bronze',
     activeCommitmentRequestId: d.activeCommitmentRequestId || null,
-    status: d.status || 'ACTIVE',
-    warningCount: d.warningCount || 0,
-    avatarUrl: d.avatarUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+    status: user.status || d.status || 'ACTIVE',
+    warningCount: user.warningCount || d.warningCount || 0,
+    avatarUrl: user.avatarUrl || d.avatarUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+    role: user.role || 'USER',
+  };
+}
+
+export function transformBackendUser(u: any): UserProfile {
+  const dp = u.donorProfile || {};
+  const bg = normalizeBloodGroup(dp.bloodGroup || u.bloodGroup || 'O_POS') as BloodGroup;
+
+  return {
+    id: u.id,
+    name: u.name || 'User',
+    phone: u.phone || '',
+    email: u.email || `${u.id.toLowerCase()}@lifedrop.io`,
+    dob: u.dob ? new Date(u.dob).toISOString().slice(0, 10) : '1998-01-01',
+    bloodGroup: bg,
+    city: u.city || 'Guntur',
+    location: u.location || 'Guntur',
+    latitude: u.latitude ?? 16.3067,
+    longitude: u.longitude ?? 80.4365,
+    lastDonationDate: dp.lastDonationDate ? new Date(dp.lastDonationDate).toISOString().slice(0, 10) : null,
+    nextEligibleDate: dp.nextEligibleDate ? new Date(dp.nextEligibleDate).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
+    isEligible: dp.isEligible ?? true,
+    totalDonations: dp.totalDonations ?? 0,
+    rank: dp.rank || 'Bronze',
+    activeCommitmentRequestId: dp.activeCommitmentRequestId || null,
+    status: u.status || 'ACTIVE',
+    warningCount: u.warningCount ?? 0,
+    avatarUrl: u.avatarUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+    role: u.role || 'USER',
   };
 }
 
