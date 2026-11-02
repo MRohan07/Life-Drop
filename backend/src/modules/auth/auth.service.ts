@@ -28,6 +28,7 @@ export const USER_AUTH_INCLUDE = {
       inventoryBalances: true,
     },
   },
+  facilityApplication: true,
   adminProfile: true,
   notificationPreferences: true,
 };
@@ -171,7 +172,7 @@ export class AuthService {
    */
   async login(identifier: string, password?: string, role?: UserRole) {
     const trimmedId = identifier.trim();
-    const user = await prisma.user.findFirst({
+    let user = await prisma.user.findFirst({
       where: {
         OR: [
           { phone: trimmedId },
@@ -183,7 +184,7 @@ export class AuthService {
     });
 
     if (!user) {
-      // Check if there is a pending, under-review, or rejected facility application
+      // Check if there is an approved, pending, under-review, or rejected facility application
       const facilityApp = await prisma.facilityApplication.findFirst({
         where: {
           OR: [
@@ -195,13 +196,6 @@ export class AuthService {
       });
 
       if (facilityApp) {
-        if (password && facilityApp.passwordHash) {
-          const isPassValid = await verifyPassword(facilityApp.passwordHash, password);
-          if (!isPassValid) {
-            throw AppError.unauthorized('Invalid password entered');
-          }
-        }
-
         if (facilityApp.status === 'PENDING' || facilityApp.status === 'UNDER_REVIEW') {
           throw AppError.forbidden(
             'Your facility registration is awaiting admin approval.',
@@ -222,15 +216,39 @@ export class AuthService {
             'Your account has been suspended.',
             'ACCOUNT_SUSPENDED'
           );
-        } else if (facilityApp.status === 'APPROVED' && !facilityApp.isActivated) {
-          throw AppError.forbidden(
-            'Your account is awaiting activation.',
-            'ACCOUNT_PENDING_ACTIVATION'
-          );
+        } else if (facilityApp.status === 'APPROVED') {
+          // Verify password against application.passwordHash
+          if (password && facilityApp.passwordHash) {
+            const isPassValid = await verifyPassword(facilityApp.passwordHash, password);
+            if (!isPassValid) {
+              throw AppError.unauthorized('Invalid password entered');
+            }
+          }
+          // Safely reconcile this application
+          await facilityApplicationsService.reconcileApprovedFacilityApplications(facilityApp.id);
+          // Find the newly reconciled user
+          const reconciledUser = await prisma.user.findFirst({
+            where: {
+              OR: [
+                { email: { equals: facilityApp.email, mode: 'insensitive' } },
+                { phone: facilityApp.phone },
+                ...(facilityApp.createdUserId ? [{ id: facilityApp.createdUserId }] : []),
+              ],
+            },
+            include: USER_AUTH_INCLUDE,
+          });
+
+          if (reconciledUser) {
+            user = reconciledUser;
+          } else {
+            throw AppError.unauthorized('Failed to activate facility user account');
+          }
         }
       }
 
-      throw AppError.unauthorized('No account found matching these credentials');
+      if (!user) {
+        throw AppError.unauthorized('No account found matching these credentials');
+      }
     }
 
     if (user.status === UserStatus.SUSPENDED) {
@@ -238,6 +256,71 @@ export class AuthService {
         'Your account has been suspended.',
         'ACCOUNT_SUSPENDED'
       );
+    }
+
+    // Auto-reconcile approved facilities that were awaiting activation
+    if (
+      user.status === UserStatus.PENDING_ACTIVATION ||
+      (user.role === UserRole.HOSPITAL && (!user.hospital?.isVerified || user.hospital?.status === VerificationStatus.PENDING_APPROVAL)) ||
+      (user.role === UserRole.BLOOD_BANK && (!user.bloodBank?.isVerified || user.bloodBank?.status === VerificationStatus.PENDING_APPROVAL))
+    ) {
+      const appId =
+        user.hospital?.facilityApplicationId ||
+        user.bloodBank?.facilityApplicationId ||
+        user.facilityApplication?.id;
+
+      const linkedApp = appId
+        ? await prisma.facilityApplication.findUnique({ where: { id: appId } })
+        : await prisma.facilityApplication.findFirst({
+            where: {
+              OR: [
+                { createdUserId: user.id },
+                ...(user.email ? [{ email: { equals: user.email, mode: 'insensitive' as const } }] : []),
+                ...(user.phone ? [{ phone: user.phone }] : []),
+              ],
+            },
+          });
+
+      if (linkedApp) {
+        if (linkedApp.status === 'SUSPENDED') {
+          throw AppError.forbidden('Your account has been suspended.', 'ACCOUNT_SUSPENDED');
+        }
+        if (linkedApp.status === 'REJECTED') {
+          throw AppError.forbidden(
+            `Your facility application was rejected: ${linkedApp.rejectionReason || 'Criteria not met.'}`,
+            'FACILITY_REJECTED'
+          );
+        }
+        if (linkedApp.status === 'PENDING' || linkedApp.status === 'UNDER_REVIEW') {
+          throw AppError.forbidden(
+            'Your facility registration is awaiting admin approval.',
+            'FACILITY_PENDING_APPROVAL'
+          );
+        }
+        if (linkedApp.status === 'NEEDS_INFORMATION') {
+          throw AppError.forbidden(
+            `Administrator requested additional details for application (${linkedApp.referenceNumber}): "${linkedApp.requestedInfoQuery || ''}". Please use Track Application to respond.`,
+            'FACILITY_NEEDS_INFORMATION'
+          );
+        }
+        if (linkedApp.status === 'APPROVED') {
+          const passwordHashToVerify = user.passwordHash || linkedApp.passwordHash;
+          if (password && passwordHashToVerify) {
+            const isValid = await verifyPassword(passwordHashToVerify, password);
+            if (!isValid) {
+              throw AppError.unauthorized('Invalid password entered');
+            }
+          }
+          await facilityApplicationsService.reconcileApprovedFacilityApplications(linkedApp.id);
+          const refreshedUser = await prisma.user.findUnique({
+            where: { id: user.id },
+            include: USER_AUTH_INCLUDE,
+          });
+          if (refreshedUser) {
+            user = refreshedUser;
+          }
+        }
+      }
     }
 
     if (user.status === UserStatus.PENDING_ACTIVATION) {

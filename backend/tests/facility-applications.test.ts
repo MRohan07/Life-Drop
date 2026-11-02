@@ -10,6 +10,7 @@ import {
 import { prisma } from '../src/config/database.js';
 import { ApplicationStatus, UserRole, UserStatus, VerificationStatus } from '@prisma/client';
 import { signAccessToken } from '../src/common/utils/tokens.js';
+import { hashPassword } from '../src/common/utils/security.js';
 
 describe('Hospital and Blood Bank Registration & Admin Approval Workflow', () => {
   beforeEach(async () => {
@@ -504,17 +505,17 @@ describe('Hospital and Blood Bank Registration & Admin Approval Workflow', () =>
     expect(loginRes.body.code).toBe('FACILITY_PENDING_APPROVAL');
   });
 
-  // 14. Unactivated approved facilities cannot log in and receive ACCOUNT_PENDING_ACTIVATION
-  it('14. Unactivated approved facilities receive ACCOUNT_PENDING_ACTIVATION on login', async () => {
+  // 14. Admin approval atomically activates the facility account, allowing immediate login with registered credentials
+  it('14. Admin approval atomically activates the facility account, allowing immediate login with registered credentials', async () => {
     const { token: adminToken } = await createTestAdmin();
 
     const app = await prisma.facilityApplication.create({
       data: {
         referenceNumber: 'APP-HOSP-2026-ACT1',
         facilityType: 'HOSPITAL',
-        name: 'Approved But Unactivated Hospital',
+        name: 'Approved And Activated Hospital',
         phone: '+919876222221',
-        email: 'unactivated@hospital.org',
+        email: 'activated@hospital.org',
         address: 'Park Avenue',
         city: 'Guntur',
         licenseNumber: 'HOSP-LIC-ACT1',
@@ -523,6 +524,7 @@ describe('Hospital and Blood Bank Registration & Admin Approval Workflow', () =>
         authorizedPersonPhone: '+919876222222',
         authorizedPersonEmail: 'act@hospital.org',
         status: ApplicationStatus.PENDING,
+        passwordHash: await hashPassword('LifeDrop@2026!'),
       },
     });
 
@@ -530,18 +532,22 @@ describe('Hospital and Blood Bank Registration & Admin Approval Workflow', () =>
     const approveRes = await request
       .post(`/api/v1/facility-applications/${app.id}/approve`)
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ notes: 'Approved for activation.' });
+      .send({ notes: 'Approved and activated.' });
 
     expect(approveRes.status).toBe(200);
+    expect(approveRes.body.data.application.status).toBe('APPROVED');
+    expect(approveRes.body.data.application.isActivated).toBe(true);
 
-    // Attempt login before redeeming activation token
+    // Facility can log in immediately with the password set during registration
     const loginRes = await request.post('/api/v1/auth/login').send({
-      identifier: 'unactivated@hospital.org',
+      identifier: 'activated@hospital.org',
       password: 'LifeDrop@2026!',
     });
 
-    expect(loginRes.status).toBe(403);
-    expect(loginRes.body.code).toBe('ACCOUNT_PENDING_ACTIVATION');
+    expect(loginRes.status).toBe(200);
+    expect(loginRes.body.data.user.role).toBe('HOSPITAL');
+    expect(loginRes.body.data.user.status).toBe('ACTIVE');
+    expect(loginRes.body.data.accessToken).toBeDefined();
   });
 
   // 15. Activation transitions user to ACTIVE and allows login
@@ -916,44 +922,42 @@ describe('Hospital and Blood Bank Registration & Admin Approval Workflow', () =>
     });
 
     expect(bb).not.toBeNull();
-    expect(bb?.isVerified).toBe(false);
-    expect(bb?.status).toBe(VerificationStatus.PENDING_APPROVAL);
+    expect(bb?.isVerified).toBe(true);
+    expect(bb?.status).toBe(VerificationStatus.VERIFIED);
     expect(bb?.inventoryBalances).toHaveLength(0);
   });
 
-  // 23. Facilities cannot operate before activation
-  it('23. Facilities cannot operate before activation', async () => {
-    const { token: adminToken } = await createTestAdmin();
-
-    const app = await prisma.facilityApplication.create({
+  // 23. Pending unverified facilities cannot operate before approval
+  it('23. Pending unverified facilities cannot operate before approval', async () => {
+    // Create an unverified hospital user awaiting approval
+    const unverifiedUser = await prisma.user.create({
       data: {
-        referenceNumber: 'APP-HOSP-NO-OP-PREACT',
-        facilityType: 'HOSPITAL',
-        name: 'Pre-Activation Hospital',
+        name: 'Pending Unapproved Hospital',
         phone: '+919876550040',
         email: 'noop@hospital.org',
-        address: 'Station Road',
+        role: UserRole.HOSPITAL,
+        status: UserStatus.ACTIVE,
         city: 'Guntur',
-        licenseNumber: 'HOSP-LIC-NOOP',
-        authorizedPersonName: 'Dr. Noop',
-        authorizedPersonDesignation: 'Chief',
-        authorizedPersonPhone: '+919876550041',
-        authorizedPersonEmail: 'noop@hospital.org',
-        status: ApplicationStatus.PENDING,
+        hospital: {
+          create: {
+            name: 'Pending Unapproved Hospital',
+            licenseNumber: 'HOSP-LIC-NOOP',
+            registrationNumber: 'HOSP-REG-NOOP',
+            phone: '+919876550040',
+            email: 'noop@hospital.org',
+            address: 'Station Road',
+            city: 'Guntur',
+            latitude: 16.3067,
+            longitude: 80.4365,
+            isVerified: false,
+            status: VerificationStatus.PENDING_APPROVAL,
+          },
+        },
       },
     });
 
-    const approveRes = await request
-      .post(`/api/v1/facility-applications/${app.id}/approve`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({});
-
-    expect(approveRes.status).toBe(200);
-    const userId = approveRes.body.data.user.id;
-
-    // Generate token for this approved but unactivated user
-    const preActivationToken = signAccessToken({
-      userId,
+    const unverifiedToken = signAccessToken({
+      userId: unverifiedUser.id,
       phone: '+919876550040',
       role: UserRole.HOSPITAL,
     });
@@ -961,7 +965,7 @@ describe('Hospital and Blood Bank Registration & Admin Approval Workflow', () =>
     // Attempt operational action (creating blood request)
     const opRes = await request
       .post('/api/v1/blood-requests')
-      .set('Authorization', `Bearer ${preActivationToken}`)
+      .set('Authorization', `Bearer ${unverifiedToken}`)
       .send({
         bloodGroup: 'A_POS',
         unitsRequired: 1,
@@ -970,7 +974,7 @@ describe('Hospital and Blood Bank Registration & Admin Approval Workflow', () =>
       });
 
     expect(opRes.status).toBe(403);
-    expect(['ACCOUNT_PENDING_ACTIVATION', 'FACILITY_PENDING_APPROVAL']).toContain(opRes.body.code);
+    expect(opRes.body.code).toBe('FACILITY_PENDING_APPROVAL');
   });
 
   // 24. Activation verifies and activates only the exact linked account

@@ -89,7 +89,7 @@ export const ApplicationStatusModal: React.FC<ApplicationStatusModalProps> = ({
     }
   };
 
-  const getStatusBadge = (status: string) => {
+  const getStatusBadge = (status: string, isActivated?: boolean) => {
     switch (status) {
       case 'PENDING':
         return (
@@ -113,10 +113,15 @@ export const ApplicationStatusModal: React.FC<ApplicationStatusModalProps> = ({
           </span>
         );
       case 'APPROVED':
-        return (
+        return isActivated ? (
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold">
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-            Approved • Ready for Activation
+            Approved • Active
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-teal-100 text-teal-800 text-xs font-bold">
+            <Clock className="w-3.5 h-3.5 text-teal-600" />
+            Approved • Activation Pending
           </span>
         );
       case 'REJECTED':
@@ -226,7 +231,7 @@ export const ApplicationStatusModal: React.FC<ApplicationStatusModalProps> = ({
                     {statusData.facilityType === 'HOSPITAL' ? 'Hospital' : 'Blood Bank'} • {statusData.city}
                   </div>
                 </div>
-                <div>{getStatusBadge(statusData.status)}</div>
+                <div>{getStatusBadge(statusData.status, statusData.isActivated)}</div>
               </div>
 
               <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
@@ -293,10 +298,14 @@ export const ApplicationStatusModal: React.FC<ApplicationStatusModalProps> = ({
                 <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-200 space-y-3">
                   <div className="flex items-center gap-2 text-xs font-bold text-emerald-900">
                     <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    Congratulations! Your application has been approved.
+                    {statusData.isActivated
+                      ? 'Congratulations! Your application has been approved and activated.'
+                      : 'Congratulations! Your application has been approved.'}
                   </div>
                   <p className="text-xs text-emerald-800 font-medium">
-                    Your facility account is now active. You can log into the system immediately using your official email ({statusData.email}) and the password you set during registration.
+                    {statusData.isActivated
+                      ? `Your facility account is now active. You can log into the system immediately using your official email (${statusData.email || 'your registered email'}) and the password you set during registration.`
+                      : 'Your application has been approved by the administrator. Account activation is finalizing. You can sign in using your registered credentials to complete activation.'}
                   </p>
                   <button
                     onClick={onClose}

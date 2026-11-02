@@ -276,6 +276,8 @@ export class FacilityApplicationsService {
     return {
       referenceNumber: application.referenceNumber,
       name: application.name,
+      email: application.email,
+      phone: application.phone,
       facilityType: application.facilityType,
       category: application.category,
       city: application.city,
@@ -288,7 +290,9 @@ export class FacilityApplicationsService {
       recentReviews: application.reviews,
       message:
         application.status === ApplicationStatus.APPROVED
-          ? 'Your facility application is APPROVED! You can now log in directly with your email and password.'
+          ? application.isActivated
+            ? 'Your facility application is APPROVED and active! You can now log in directly with your email and password.'
+            : 'Your facility application is APPROVED! Account activation is pending final reconciliation.'
           : application.status === ApplicationStatus.REJECTED
           ? `Your facility application was REJECTED: ${application.rejectionReason || 'Statutory criteria not met.'}`
           : application.status === ApplicationStatus.NEEDS_INFORMATION
@@ -577,7 +581,7 @@ export class FacilityApplicationsService {
   }
 
   /**
-   * Admin approves application and generates secure activation invitation
+   * Admin approves application and atomically activates the facility account
    */
   async approveApplication(id: string, adminId: string, notes?: string) {
     const application = await prisma.facilityApplication.findUnique({
@@ -597,7 +601,26 @@ export class FacilityApplicationsService {
     if (!application) throw AppError.notFound('Facility application not found.');
 
     if (application.status === ApplicationStatus.APPROVED && application.isActivated) {
-      throw AppError.badRequest('Facility account for this application has already been activated.');
+      // Prevent duplicate facility accounts when an application is approved multiple times
+      const existingUser = application.createdUser || (await prisma.user.findFirst({
+        where: {
+          OR: [
+            { id: application.createdUserId || undefined },
+            { email: { equals: application.email, mode: 'insensitive' } },
+            { phone: application.phone },
+          ],
+        },
+        include: { hospital: true, bloodBank: true },
+      }));
+
+      return {
+        application,
+        activationToken: application.activationToken,
+        user: existingUser,
+        hospital: application.hospital || existingUser?.hospital,
+        bloodBank: application.bloodBank || existingUser?.bloodBank,
+        message: 'Facility application is already approved and active.',
+      };
     }
 
     if (application.status === ApplicationStatus.REJECTED) {
@@ -607,7 +630,7 @@ export class FacilityApplicationsService {
     const expectedRole =
       application.facilityType === FacilityType.HOSPITAL ? UserRole.HOSPITAL : UserRole.BLOOD_BANK;
 
-    // Generate high-entropy 64-character activation token for audit and activation
+    // Generate high-entropy 64-character activation token for audit and activation records
     const activationToken = crypto.randomBytes(32).toString('hex');
     const activationTokenExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
@@ -645,8 +668,13 @@ export class FacilityApplicationsService {
           );
         }
 
-        // Never demote or modify an unrelated ACTIVE account.
-        if (existing.status === UserStatus.ACTIVE && existing.id !== application.createdUserId) {
+        // Never demote or modify an unrelated ACTIVE account belonging to another application.
+        if (
+          existing.status === UserStatus.ACTIVE &&
+          existing.id !== application.createdUserId &&
+          existing.facilityApplication &&
+          existing.facilityApplication.id !== application.id
+        ) {
           throw AppError.conflict(
             'An active facility account already exists with these contact details. Conflicting match rejected.'
           );
@@ -688,11 +716,11 @@ export class FacilityApplicationsService {
           }
         }
 
-        // Re-link or update user to PENDING_ACTIVATION
+        // Update user to ACTIVE status and preserve original password
         linkedUser = await tx.user.update({
           where: { id: existing.id },
           data: {
-            status: UserStatus.PENDING_ACTIVATION,
+            status: UserStatus.ACTIVE,
             name: application.name,
             city: application.city,
             location: application.address,
@@ -704,7 +732,7 @@ export class FacilityApplicationsService {
           },
         });
       } else {
-        // Create new User account in PENDING_ACTIVATION
+        // Create new User account directly in ACTIVE status
         linkedUser = await tx.user.create({
           data: {
             name: application.name,
@@ -712,7 +740,7 @@ export class FacilityApplicationsService {
             phone: application.phone,
             passwordHash: application.passwordHash,
             role: expectedRole,
-            status: UserStatus.PENDING_ACTIVATION,
+            status: UserStatus.ACTIVE,
             city: application.city,
             location: application.address,
             latitude: application.latitude || 16.3067,
@@ -725,8 +753,7 @@ export class FacilityApplicationsService {
       }
 
       // 2. Create or verify facility profile:
-      // Keep it PENDING_APPROVAL and isVerified: false until activation is successfully completed!
-      // Verify that any reused facility profile belongs to the same user and application. Reject ownership conflicts.
+      // Mark as VERIFIED and isVerified: true!
       let facilityRecord: any = null;
 
       if (application.facilityType === FacilityType.HOSPITAL) {
@@ -759,10 +786,11 @@ export class FacilityApplicationsService {
           facilityRecord = await tx.hospital.update({
             where: { id: existingHospital.id },
             data: {
+              userId: linkedUser.id,
               name: application.name,
               facilityApplicationId: application.id,
-              isVerified: false,
-              status: VerificationStatus.PENDING_APPROVAL,
+              isVerified: true,
+              status: VerificationStatus.VERIFIED,
             },
           });
         } else {
@@ -792,8 +820,8 @@ export class FacilityApplicationsService {
               authorizedPersonPhone: application.authorizedPersonPhone,
               authorizedPersonEmail: application.authorizedPersonEmail,
               emergencyContact: application.emergencyContact,
-              isVerified: false,
-              status: VerificationStatus.PENDING_APPROVAL,
+              isVerified: true,
+              status: VerificationStatus.VERIFIED,
               facilityApplicationId: application.id,
             },
           });
@@ -829,10 +857,11 @@ export class FacilityApplicationsService {
           facilityRecord = await tx.bloodBank.update({
             where: { id: existingBB.id },
             data: {
+              userId: linkedUser.id,
               name: application.name,
               facilityApplicationId: application.id,
-              isVerified: false,
-              status: VerificationStatus.PENDING_APPROVAL,
+              isVerified: true,
+              status: VerificationStatus.VERIFIED,
             },
           });
         } else {
@@ -855,16 +884,16 @@ export class FacilityApplicationsService {
               authorizedPersonDesignation: application.authorizedPersonDesignation,
               authorizedPersonPhone: application.authorizedPersonPhone,
               authorizedPersonEmail: application.authorizedPersonEmail,
-              isVerified: false,
-              status: VerificationStatus.PENDING_APPROVAL,
+              isVerified: true,
+              status: VerificationStatus.VERIFIED,
               facilityApplicationId: application.id,
             },
           });
         }
-        // Do not create any inventory during approval. Remove automatic inventory-balance creation and fabricated stock values.
+        // Do not create any inventory during approval.
       }
 
-      // 3. Update application to APPROVED with activation token
+      // 3. Update application to APPROVED and isActivated = true
       const updated = await tx.facilityApplication.update({
         where: { id },
         data: {
@@ -873,7 +902,8 @@ export class FacilityApplicationsService {
           approvedByAdminId: adminId,
           activationToken,
           activationTokenExpiresAt,
-          isActivated: false,
+          isActivated: true,
+          activatedAt: new Date(),
           createdUserId: linkedUser.id,
         },
         include: {
@@ -889,7 +919,7 @@ export class FacilityApplicationsService {
           action: 'APPROVED',
           fromStatus: application.status,
           toStatus: ApplicationStatus.APPROVED,
-          notes: notes || 'Facility application approved by administrator.',
+          notes: notes || 'Facility application approved and account activated.',
         },
       });
 
@@ -897,7 +927,7 @@ export class FacilityApplicationsService {
       await tx.auditLog.create({
         data: {
           eventType: 'FACILITY_APPLICATION_APPROVED',
-          description: `Application ${application.referenceNumber} (${application.name}) approved by administrator. Account activation invitation generated.`,
+          description: `Application ${application.referenceNumber} (${application.name}) approved and account activated by administrator.`,
           actorId: adminId,
           actorRole: 'ADMIN',
           targetId: id,
@@ -905,6 +935,7 @@ export class FacilityApplicationsService {
           details: {
             referenceNumber: application.referenceNumber,
             facilityType: application.facilityType,
+            userId: linkedUser.id,
           },
         },
       });
@@ -915,9 +946,270 @@ export class FacilityApplicationsService {
         user: linkedUser,
         hospital: application.facilityType === FacilityType.HOSPITAL ? facilityRecord : undefined,
         bloodBank: application.facilityType === FacilityType.BLOOD_BANK ? facilityRecord : undefined,
-        message: 'Facility application approved. Activation token generated.',
+        message: 'Facility application approved and account activated successfully.',
       };
     });
+  }
+
+  /**
+   * Safely reconcile approved facility applications.
+   * Ensures that any application in APPROVED status has its linked user set to ACTIVE,
+   * its facility profile (Hospital or BloodBank) VERIFIED, and isActivated set to true.
+   * Preserves existing passwords, roles, and profiles. Never alters suspended accounts.
+   */
+  async reconcileApprovedFacilityApplications(applicationId?: string) {
+    const where: any = {
+      status: ApplicationStatus.APPROVED,
+    };
+    if (applicationId) {
+      where.id = applicationId;
+    }
+
+    const approvedApplications = await prisma.facilityApplication.findMany({
+      where,
+      include: {
+        createdUser: true,
+        hospital: true,
+        bloodBank: true,
+      },
+    });
+
+    const results: Array<{ id: string; referenceNumber: string; name: string; status: string }> = [];
+
+    for (const app of approvedApplications) {
+      // Never reconcile suspended applications
+      if (app.status === ApplicationStatus.SUSPENDED) {
+        continue;
+      }
+
+      // Check if linked user is explicitly suspended
+      if (app.createdUser && app.createdUser.status === UserStatus.SUSPENDED) {
+        continue;
+      }
+
+      // Check whether this application is already fully active and consistent
+      const isUserActive = app.createdUser && app.createdUser.status === UserStatus.ACTIVE;
+      const isHospitalVerified =
+        app.facilityType === FacilityType.HOSPITAL &&
+        app.hospital &&
+        app.hospital.isVerified &&
+        app.hospital.status === VerificationStatus.VERIFIED;
+      const isBloodBankVerified =
+        app.facilityType === FacilityType.BLOOD_BANK &&
+        app.bloodBank &&
+        app.bloodBank.isVerified &&
+        app.bloodBank.status === VerificationStatus.VERIFIED;
+
+      if (app.isActivated && isUserActive && (isHospitalVerified || isBloodBankVerified)) {
+        // Already fully active and consistent
+        continue;
+      }
+
+      const expectedRole =
+        app.facilityType === FacilityType.HOSPITAL ? UserRole.HOSPITAL : UserRole.BLOOD_BANK;
+
+      await prisma.$transaction(async (tx) => {
+        // 1. Locate or create User
+        let user = app.createdUser;
+
+        if (!user) {
+          // Look for user matching createdUserId, email, or phone
+          const existingUser = await tx.user.findFirst({
+            where: {
+              OR: [
+                ...(app.createdUserId ? [{ id: app.createdUserId }] : []),
+                { email: { equals: app.email, mode: 'insensitive' } },
+                { phone: app.phone },
+              ],
+            },
+          });
+
+          if (existingUser) {
+            if (existingUser.status === UserStatus.SUSPENDED) {
+              return; // Do not touch suspended users
+            }
+            user = await tx.user.update({
+              where: { id: existingUser.id },
+              data: {
+                role: expectedRole,
+                status: UserStatus.ACTIVE,
+                name: app.name,
+                city: app.city,
+                location: app.address,
+                ...(app.passwordHash && !existingUser.passwordHash
+                  ? { passwordHash: app.passwordHash }
+                  : {}),
+              },
+            });
+          } else {
+            // Create user
+            user = await tx.user.create({
+              data: {
+                name: app.name,
+                email: app.email,
+                phone: app.phone,
+                passwordHash: app.passwordHash,
+                role: expectedRole,
+                status: UserStatus.ACTIVE,
+                city: app.city,
+                location: app.address,
+                latitude: app.latitude || 16.3067,
+                longitude: app.longitude || 80.4365,
+                notificationPreferences: {
+                  create: { inAppUrgent: true, inAppGeneral: true, smsEmergency: true, emailDigest: true },
+                },
+              },
+            });
+          }
+        } else {
+          // User exists, make sure status is ACTIVE and passwordHash is preserved
+          if (user.status !== UserStatus.ACTIVE || (!user.passwordHash && app.passwordHash)) {
+            user = await tx.user.update({
+              where: { id: user.id },
+              data: {
+                status: UserStatus.ACTIVE,
+                ...(app.passwordHash && !user.passwordHash ? { passwordHash: app.passwordHash } : {}),
+              },
+            });
+          }
+        }
+
+        // 2. Locate or create/update facility profile
+        if (app.facilityType === FacilityType.HOSPITAL) {
+          let hospital = app.hospital;
+          if (!hospital) {
+            hospital = await tx.hospital.findFirst({
+              where: {
+                OR: [
+                  { userId: user.id },
+                  { facilityApplicationId: app.id },
+                  { licenseNumber: app.licenseNumber },
+                ],
+              },
+            });
+          }
+
+          if (hospital) {
+            await tx.hospital.update({
+              where: { id: hospital.id },
+              data: {
+                userId: user.id,
+                facilityApplicationId: app.id,
+                name: app.name,
+                isVerified: true,
+                status: VerificationStatus.VERIFIED,
+              },
+            });
+          } else {
+            await tx.hospital.create({
+              data: {
+                userId: user.id,
+                name: app.name,
+                type: app.category || 'Private',
+                registrationNumber:
+                  app.registrationNumber || `HOSP-REG-${Date.now().toString().slice(-6)}`,
+                phone: app.phone,
+                email: app.email,
+                address: app.address,
+                area: app.area || app.city,
+                city: app.city,
+                state: app.state || 'Andhra Pradesh',
+                pinCode: app.pinCode || '522001',
+                latitude: app.latitude || 16.3067,
+                longitude: app.longitude || 80.4365,
+                services: app.services || ['Emergency Transfusion & Critical Care'],
+                licenseNumber: app.licenseNumber,
+                issuingAuthority: app.issuingAuthority,
+                licenseDocUrl: app.licenseDocUrl,
+                registrationCertUrl: app.registrationCertUrl,
+                authorizedPersonName: app.authorizedPersonName,
+                authorizedPersonDesignation: app.authorizedPersonDesignation,
+                authorizedPersonPhone: app.authorizedPersonPhone,
+                authorizedPersonEmail: app.authorizedPersonEmail,
+                emergencyContact: app.emergencyContact,
+                isVerified: true,
+                status: VerificationStatus.VERIFIED,
+                facilityApplicationId: app.id,
+              },
+            });
+          }
+        } else {
+          // Blood Bank
+          let bloodBank = app.bloodBank;
+          if (!bloodBank) {
+            bloodBank = await tx.bloodBank.findFirst({
+              where: {
+                OR: [
+                  { userId: user.id },
+                  { facilityApplicationId: app.id },
+                  { licenseNumber: app.licenseNumber },
+                ],
+              },
+            });
+          }
+
+          if (bloodBank) {
+            await tx.bloodBank.update({
+              where: { id: bloodBank.id },
+              data: {
+                userId: user.id,
+                facilityApplicationId: app.id,
+                name: app.name,
+                isVerified: true,
+                status: VerificationStatus.VERIFIED,
+              },
+            });
+          } else {
+            await tx.bloodBank.create({
+              data: {
+                userId: user.id,
+                name: app.name,
+                type: app.category || 'Charitable',
+                phone: app.phone,
+                email: app.email,
+                address: app.address,
+                city: app.city,
+                state: app.state || 'Andhra Pradesh',
+                licenseNumber: app.licenseNumber,
+                latitude: app.latitude || 16.3067,
+                longitude: app.longitude || 80.4365,
+                componentsAvailable:
+                  app.componentsAvailable || ['Red Blood Cells', 'Platelets', 'Plasma', 'Whole Blood'],
+                authorizedPersonName: app.authorizedPersonName,
+                authorizedPersonDesignation: app.authorizedPersonDesignation,
+                authorizedPersonPhone: app.authorizedPersonPhone,
+                authorizedPersonEmail: app.authorizedPersonEmail,
+                isVerified: true,
+                status: VerificationStatus.VERIFIED,
+                facilityApplicationId: app.id,
+              },
+            });
+          }
+        }
+
+        // 3. Mark application as activated
+        await tx.facilityApplication.update({
+          where: { id: app.id },
+          data: {
+            createdUserId: user.id,
+            isActivated: true,
+            activatedAt: app.activatedAt || new Date(),
+          },
+        });
+
+        results.push({
+          id: app.id,
+          referenceNumber: app.referenceNumber,
+          name: app.name,
+          status: 'RECONCILED',
+        });
+      });
+    }
+
+    return {
+      reconciledCount: results.length,
+      details: results,
+    };
   }
 
   /**
@@ -938,10 +1230,6 @@ export class FacilityApplicationsService {
 
     if (application.status !== ApplicationStatus.APPROVED) {
       throw AppError.badRequest('Facility application has not been approved.');
-    }
-
-    if (application.isActivated) {
-      throw AppError.badRequest('This facility account has already been activated. Please proceed to sign in.');
     }
 
     if (application.activationTokenExpiresAt && application.activationTokenExpiresAt < new Date()) {
@@ -986,10 +1274,6 @@ export class FacilityApplicationsService {
 
     if (application.status !== ApplicationStatus.APPROVED) {
       throw AppError.badRequest('Facility application has not been approved.');
-    }
-
-    if (application.isActivated) {
-      throw AppError.badRequest('This facility account has already been activated.');
     }
 
     if (application.activationTokenExpiresAt && application.activationTokenExpiresAt < new Date()) {

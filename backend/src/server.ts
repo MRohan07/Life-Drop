@@ -2,6 +2,7 @@ import app from './app.js';
 import { ENV } from './config/env.js';
 import { logger } from './common/logging/logger.js';
 import { prisma } from './config/database.js';
+import { facilityApplicationsService } from './modules/facility-applications/facility-applications.service.js';
 
 const PORT = Number(process.env.PORT) || ENV.PORT || 5001;
 const HOST = '0.0.0.0';
@@ -12,6 +13,15 @@ const server = app.listen(PORT, HOST, async () => {
     logger.info(`🩸 LifeDrop API Server listening on ${HOST}:${PORT} [${ENV.NODE_ENV}]`);
     logger.info(`📘 Swagger OpenAPI documentation available at /docs`);
     logger.info(`🩺 Health check ready at /health and /health/ready`);
+
+    try {
+      const reconcileResult = await facilityApplicationsService.reconcileApprovedFacilityApplications();
+      if (reconcileResult.reconciledCount > 0) {
+        logger.info(`Automated startup reconciliation: activated ${reconcileResult.reconciledCount} approved facility account(s).`);
+      }
+    } catch (reconcileErr) {
+      logger.warn({ err: reconcileErr }, 'Startup reconciliation of approved facilities completed with warnings.');
+    }
   } catch (err) {
     logger.error({ err }, 'Failed to connect to PostgreSQL database on startup');
     process.exit(1);
